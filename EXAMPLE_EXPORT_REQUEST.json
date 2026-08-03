@@ -1,0 +1,38 @@
+{
+  "searchText": "",
+  "customerName": "",
+  "partnerName": "",
+  "brandName": "",
+  "maNguoiXuLy1": null,
+  "maSPDVList": [],
+  "trangThaiDon": null,
+  "trangThaiVuViec": null,
+  "trangThaiTaiLieu": null,
+  "loaiDon": null,
+  "fields": [
+    "soDon",
+    "maHoSoVuViec",
+    "tenKhachHang",
+    "tenDoiTac",
+    "tenNhanHieu",
+    "tinhTrangDon",
+    "trangThaiVuViec",
+    "hanXuLy",
+    "hanTraLoi",
+    "ngayNopDon",
+    "loaiDon"
+  ],
+  "filterCondition": {
+    "selectedField": "",
+    "fromDate": "",
+    "toDate": "",
+    "hanXuLyFilter": "",
+    "hanTraLoiFilter": "",
+    "sortByHanXuLy": false,
+    "sortByHanTraLoi": false,
+    "sortByUpdatedAt": true,
+    "sortByCreatedAt": false
+  },
+  "reportTitle": "BÁO CÁO DANH SÁCH ĐƠN ĐĂNG KÝ NHÃN HIỆU VIỆT NAM",
+  "reportFileName": "bao_cao_don_VN_20260723"
+}

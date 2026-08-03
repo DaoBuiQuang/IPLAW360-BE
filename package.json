@@ -1,0 +1,38 @@
+{
+  "name": "backend-nodejs",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node --watch server.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "esbuild server.js --bundle --platform=node --target=node18 --outfile=dist/server.js --external:pg-hstore"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "bcrypt": "^5.1.1",
+    "bcryptjs": "^3.0.2",
+    "cors": "^2.8.5",
+    "dayjs": "^1.11.18",
+    "dotenv": "^16.5.0",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.4.0",
+    "iconv-lite": "^0.7.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.1",
+    "mysql2": "^3.12.0",
+    "node-cron": "^4.0.7",
+    "pg-hstore": "^2.3.4",
+    "sequelize": "^6.37.5",
+    "swagger-jsdoc": "^6.3.0",
+    "swagger-ui-express": "^5.0.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.5",
+    "nodemon": "^3.1.9"
+  }
+}
