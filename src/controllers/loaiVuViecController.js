@@ -1,8 +1,9 @@
 import { Op } from "sequelize";
 import { LoaiVuViec } from "../models/loaiVuViecModel.js";
 import { NganhNghe } from "../models/nganhNgheModel.js";
-import { FCMToken } from "../models/fcmTokenModel.js";
-import { sendNotificationToMany } from "../firebase/sendNotification.js";
+// Tạm tắt các thao tác notification Firebase.
+// import { FCMToken } from "../models/fcmTokenModel.js";
+// import { sendNotificationToMany } from "../firebase/sendNotification.js";
 import { sendGenericNotification } from "../utils/notificationHelper.js";
 import { Sequelize } from "sequelize"; 
 export const getCaseTypes = async (req, res) => {
@@ -253,9 +254,9 @@ export const updateIndustry = async (req, res) => {
 
         industry.tenNganhNghe = tenNganhNghe;
         await industry.save();
-        const tokenRecords = await FCMToken.findAll();
-        const tokens = tokenRecords.map(rec => rec.token).filter(Boolean);
-
+        // Tạm tắt lấy FCM token và gửi notification Firebase.
+        // const tokenRecords = await FCMToken.findAll();
+        // const tokens = tokenRecords.map(rec => rec.token).filter(Boolean);
         // if (tokens.length > 0) {
         //     await sendNotificationToMany({maNhanSuCapNhap, tokens, "Cập nhật ngành nghề", `Ngành nghề '${tenNganhNghe}' đã được cập nhật.`});
         // }

@@ -13,7 +13,8 @@ import loaiDonRouter from "./src/routers/loaiDonRouter.js"
 import donDangKyRouter from "./src/routers/donDangKyRouter.js"
 import nhanHieuRouter from "./src/routers/nhanHieuRouter.js"
 import sanPham_DichVuRouter from "./src/routers/sanPham_DichVuRouter.js"
-import pushNotificationRouter from "./src/routers/pushNotificationRouter.js";
+// Tạm tắt notification Firebase.
+// import pushNotificationRouter from "./src/routers/pushNotificationRouter.js";
 import dashBoardRouter from "./src/routers/dashBoardRouter.js"
 import uploadRouter from "./src/routers/uploadRouter.js";
 import rollbackRouter from "./src/routers/rollbackRouter.js";
@@ -68,7 +69,8 @@ app.use("/api", nhanHieuRouter)
 app.use("/api", sanPham_DichVuRouter)
 app.use("/api", dashBoardRouter)
 // app.use("/api", nganhNgheRouter)
-app.use("/api", pushNotificationRouter);
+// Tạm tắt notification Firebase.
+// app.use("/api", pushNotificationRouter);
 app.use("/api", uploadRouter);
 app.use("/api", rollbackRouter);
 app.use("/api", donDangKyNhanHieu_KHRouter);

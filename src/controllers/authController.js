@@ -2,7 +2,8 @@ import { Auth } from "../models/authModel.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { NhanSu } from "../models/nhanSuModel.js";
-import { FCMToken } from "../models/fcmTokenModel.js";
+// Tạm tắt thao tác FCM token cùng notification Firebase.
+// import { FCMToken } from "../models/fcmTokenModel.js";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -86,11 +87,11 @@ export const logout = async (req, res) => {
       return res.status(400).json({ message: "Người dùng không tồn tại" });
     }
 
-    const maNhanSu = user.maNhanSu;
-
-    await FCMToken.destroy({
-      where: { maNhanSu }
-    });
+    // Tạm tắt xóa FCM token cùng notification Firebase.
+    // const maNhanSu = user.maNhanSu;
+    // await FCMToken.destroy({
+    //   where: { maNhanSu }
+    // });
     await user.update({ Token: null });
 
     return res.status(200).json({ message: "Đăng xuất thành công" });

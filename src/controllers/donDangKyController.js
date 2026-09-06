@@ -533,6 +533,7 @@ export const createApplication = async (req, res) => {
                 maDonDangKy,
                 maHoSoVuViec: maHoSo,
                 maNguoiXuLy1: maNguoiXuLy1 || null,
+                maNguoiXuLy2: maNguoiXuLy2 || null,
                 maHoSo,
             },
             { transaction }

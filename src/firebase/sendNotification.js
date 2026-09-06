@@ -1,5 +1,6 @@
 // sendNotification.js
-import admin from "./firebaseAdmin.js";
+// Tạm thời vô hiệu hóa Firebase Admin notification.
+// import admin from "./firebaseAdmin.js";
 import { FCMToken } from "../models/fcmTokenModel.js";
 import { Notification } from "../models/notificationModel.js"; // ✅ import bảng notification
 import { Op } from "sequelize";
