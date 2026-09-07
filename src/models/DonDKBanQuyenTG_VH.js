@@ -1,7 +1,7 @@
 import { DataTypes } from "sequelize";
-import { sequelize } from "../../config/db.js";
+import { sequelize } from "../config/db.js";
 
-import { DonDangKy } from "../donDangKyModel.js";
+import { DonDangKy } from "./donDangKyModel.js";
 import { KhachHangCuoi } from "./khanhHangCuoiModel.js";
 import { DoiTac } from "./doiTacModel.js";
 import { NhanSu } from "./nhanSuModel.js";

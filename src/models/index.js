@@ -65,6 +65,8 @@ import { NguoiLienHe } from "./nguoiLienHeModal.js";
 import { GiayUyQuyen } from "./GiayUyQuyenModel.js";
 import { DonTachNH_VN } from "./VN_TachDon_NH/donTachNH_VNModel.js";
 import { DonTachNH_KH } from "./KH_TachDon_NH/donTachNH_KHModel.js";
+import { TimeSheet } from "./timeSheetModel.js";
+
 Auth.belongsTo(NhanSu, {
     foreignKey: 'maNhanSu',
     targetKey: 'maNhanSu',
@@ -491,5 +493,6 @@ export {
     TuVanChung_VN,
     TuVanChung_KH,
     DonTachNH_VN,
-    DonTachNH_KH    
+    DonTachNH_KH,
+    TimeSheet
 };

@@ -44,6 +44,15 @@ export const NhanSu = sequelize.define("NhanSu", {
         type: DataTypes.STRING,
         allowNull: true,
     },
+    hourlyRate: {
+        type: DataTypes.DECIMAL(15, 2),
+        allowNull: false,
+        defaultValue: 0,
+        validate: {
+            min: 0,
+        },
+        comment: "Default hourly rate of the employee",
+    },
     // maNhanSuCapNhap: {
     //     type: DataTypes.STRING,
     //     allowNull: true,

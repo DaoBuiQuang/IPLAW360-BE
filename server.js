@@ -34,6 +34,7 @@ import donSuaDoiNhanHieu_KHRouter from "./src/routers/donSuaDoiNhanHieu_KHRouter
 import nguoiLienHeRouter from "./src/routers/nguoiLienHeRouter.js"
 import giayUyQuyenRouter from "./src/routers/giayUyQuyenRouter.js"
 import donTachRouter from "./src/routers/donTachRouter.js"
+import timeSheetRouter from "./src/routers/timeSheetRouter.js"
 // import nganhNgheRouter from "./src/routers/nganhNgheRouter.js"
 import { connectDB } from "./src/config/db.js";
 import { syncDatabase } from "./src/models/index.js";
@@ -89,6 +90,7 @@ app.use("/api", donSuaDoiNhanHieu_KHRouter);
 app.use("/api", nguoiLienHeRouter);
 app.use("/api", giayUyQuyenRouter);
 app.use("/api", donTachRouter);
+app.use("/api", timeSheetRouter);
 connectDB();
 syncDatabase();
 const PORT = process.env.PORT || 3000;

@@ -21,7 +21,7 @@ export const getNhanSuBasicList = async (req, res) => {
 
 export const createNhanSu = async (req, res) => {
     try {
-        const { maNhanSu, hoTen, chucVu, phongBan, sdt, email, ngayThangNamSinh, cccd, bangCap } = req.body;
+        const { maNhanSu, hoTen, chucVu, phongBan, sdt, email, ngayThangNamSinh, cccd, bangCap, hourlyRate } = req.body;
 
         if (!maNhanSu || !hoTen) {
             return res.status(400).json({ message: "Mã nhân sự và họ tên là bắt buộc" });
@@ -31,7 +31,7 @@ export const createNhanSu = async (req, res) => {
         //     return res.status(409).json({ message: "Mã nhân sự đã tồn tại" });
         // }
 
-        const newNhanSu = await NhanSu.create({ maNhanSu, hoTen, chucVu, phongBan, sdt, email, ngayThangNamSinh, cccd, bangCap });
+        const newNhanSu = await NhanSu.create({ maNhanSu, hoTen, chucVu, phongBan, sdt, email, ngayThangNamSinh, cccd, bangCap, hourlyRate });
 
         res.status(201).json({ message: "Thêm nhân viên thành công", nhanSu: newNhanSu });
     } catch (error) {
@@ -52,7 +52,7 @@ export const updateNhanSu = async (req, res) => {
         const {
             maNhanSu,
             hoTen, chucVu, phongBan, sdt, email,
-            ngayThangNamSinh, cccd, bangCap,
+            ngayThangNamSinh, cccd, bangCap, hourlyRate,
             maNhanSuCapNhap
         } = req.body;
 
@@ -63,7 +63,7 @@ export const updateNhanSu = async (req, res) => {
 
         const fieldsToUpdate = {
             hoTen, chucVu, phongBan, sdt, email,
-            ngayThangNamSinh, cccd, bangCap, maNhanSuCapNhap
+            ngayThangNamSinh, cccd, bangCap, hourlyRate, maNhanSuCapNhap
         };
 
         const changedFields = [];
