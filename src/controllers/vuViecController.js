@@ -14,7 +14,7 @@ export const getVuViecs = async (req, res) => {
       fields = [],
       pageIndex = 1,
       pageSize = 20,
-      maQuocGia,      // nếu muốn cứng VN thì có thể bỏ param này
+      maQuocGia, // nếu muốn cứng VN thì có thể bỏ param này
       idKhachHang,
       idDoiTac,
     } = req.body;
@@ -37,7 +37,11 @@ export const getVuViecs = async (req, res) => {
       include: [
         { model: DoiTac, as: "DoiTac", attributes: ["tenDoiTac"] },
         { model: QuocGia, as: "QuocGia", attributes: ["tenQuocGia"] },
-        { model: KhachHangCuoi, as: "KhachHangCuoi", attributes: ["tenKhachHang"] },
+        {
+          model: KhachHangCuoi,
+          as: "KhachHangCuoi",
+          attributes: ["tenKhachHang"],
+        },
       ],
       limit: pageSize,
       offset,
@@ -63,8 +67,7 @@ export const getVuViecs = async (req, res) => {
       loaiTienTe: (vv) => vv.loaiTienTe,
       xuatBill: (vv) => vv.xuatBill,
       maDon: (vv) => vv.maDon,
-      trangThaiYCTT: (vv) => vv.trangThaiYCTT
-
+      trangThaiYCTT: (vv) => vv.trangThaiYCTT,
     };
 
     const result = vuViecs.map((vv) => {
@@ -122,14 +125,20 @@ export const getVuViecsKH = async (req, res) => {
       include: [
         { model: DoiTac, as: "DoiTac", attributes: ["tenDoiTac"] },
         { model: QuocGia, as: "QuocGia", attributes: ["tenQuocGia"] },
-        { model: KhachHangCuoi, as: "KhachHangCuoi", attributes: ["tenKhachHang"] },
+        {
+          model: KhachHangCuoi,
+          as: "KhachHangCuoi",
+          attributes: ["tenKhachHang"],
+        },
       ],
       limit: pageSize,
       offset,
     });
 
     if (!vuViecs.length) {
-      return res.status(404).json({ message: "Không tìm thấy vụ việc chính (KH)" });
+      return res
+        .status(404)
+        .json({ message: "Không tìm thấy vụ việc chính (KH)" });
     }
 
     const fieldMap = {
@@ -206,14 +215,18 @@ const fieldMap = {
 
 // approved: true -> chỉ 3 (Đã duyệt)
 // approved: false -> 0,1,2 (Chưa đề nghị / Chờ duyệt / Từ chối)
-function buildGetVuViecsDaXuatBill({ countryFixed, defaultCountryIfMissing, statusFilter }) {
+function buildGetVuViecsDaXuatBill({
+  countryFixed,
+  defaultCountryIfMissing,
+  statusFilter,
+}) {
   return async (req, res) => {
     try {
       const {
         fields = [],
         pageIndex = 1,
         pageSize = 20,
-        maQuocGia,      // chỉ dùng khi không khóa cứng
+        maQuocGia, // chỉ dùng khi không khóa cứng
         idKhachHang,
         idDoiTac,
       } = req.body;
@@ -222,7 +235,9 @@ function buildGetVuViecsDaXuatBill({ countryFixed, defaultCountryIfMissing, stat
 
       const whereCondition = {
         xuatBill: true, // luôn true
-        maQuocGiaVuViec: countryFixed ? countryFixed : (maQuocGia || defaultCountryIfMissing || "VN"),
+        maQuocGiaVuViec: countryFixed
+          ? countryFixed
+          : maQuocGia || defaultCountryIfMissing || "VN",
         trangThaiYCTT: Array.isArray(statusFilter)
           ? { [Op.in]: statusFilter }
           : statusFilter, // cho phép truyền trực tiếp 1 số (vd: 3)
@@ -237,7 +252,11 @@ function buildGetVuViecsDaXuatBill({ countryFixed, defaultCountryIfMissing, stat
         where: whereCondition,
         include: [
           { model: QuocGia, as: "QuocGia", attributes: ["tenQuocGia"] },
-          { model: KhachHangCuoi, as: "KhachHangCuoi", attributes: ["tenKhachHang"] },
+          {
+            model: KhachHangCuoi,
+            as: "KhachHangCuoi",
+            attributes: ["tenKhachHang"],
+          },
           { model: DoiTac, as: "DoiTac", attributes: ["tenDoiTac"] },
           { model: NhanSu, as: "NhanSu", attributes: ["hoTen"] },
         ],
@@ -251,8 +270,9 @@ function buildGetVuViecsDaXuatBill({ countryFixed, defaultCountryIfMissing, stat
       });
 
       if (!vuViecs.length) {
+        // Note: whereCondition gồm xuatBill=true, maQuocGiaVuViec, trangThaiYCTT
         return res.status(404).json({
-          message: "Không tìm thấy vụ việc phù hợp điều kiện (xuatBill=true, trạng thái lọc).",
+          message: "Không tìm thấy vụ việc phù hợp điều kiện.",
         });
       }
 
@@ -311,7 +331,6 @@ export const getVuViecsDaXuatBillKH_DaDuyet = buildGetVuViecsDaXuatBill({
   statusFilter: [3],
 });
 
-
 export const getVuViecsDaXuatBill_Full = buildGetVuViecsDaXuatBill({
   countryFixed: null,
   defaultCountryIfMissing: "VN",
@@ -356,9 +375,7 @@ export const getCaseById = async (req, res) => {
     }
 
     const customer = await VuViec.findByPk(id, {
-      include: [
-
-      ]
+      include: [],
     });
 
     if (!customer) {
@@ -391,7 +408,9 @@ export const getCasesByMaHoSo = async (req, res) => {
     });
 
     if (!cases || cases.length === 0) {
-      return res.status(404).json({ message: "Không tìm thấy vụ việc phù hợp" });
+      return res
+        .status(404)
+        .json({ message: "Không tìm thấy vụ việc phù hợp" });
     }
 
     res.status(200).json(cases);
@@ -400,11 +419,9 @@ export const getCasesByMaHoSo = async (req, res) => {
   }
 };
 
-
-
 export const approveYCTT = async (req, res) => {
   const { ids, id, requireXuatBill = true } = req.body || {};
-  const idList = Array.isArray(ids) ? ids : (id ? [id] : []);
+  const idList = Array.isArray(ids) ? ids : id ? [id] : [];
 
   if (!idList.length) {
     return res.status(400).json({ message: "Thiếu id/ids để duyệt." });
@@ -427,11 +444,12 @@ export const approveYCTT = async (req, res) => {
       lock: t.LOCK.UPDATE,
     });
 
-    const eligibleIds = rows.map(r => r.id);
+    const eligibleIds = rows.map((r) => r.id);
     if (eligibleIds.length === 0) {
       await t.rollback();
       return res.status(404).json({
-        message: "Không tìm thấy vụ việc hợp lệ để duyệt (có thể đã duyệt hoặc chưa xuất bill).",
+        message:
+          "Không tìm thấy vụ việc hợp lệ để duyệt (có thể đã duyệt hoặc chưa xuất bill).",
         updatedCount: 0,
         updatedIds: [],
         skippedIds: idList,
@@ -444,7 +462,7 @@ export const approveYCTT = async (req, res) => {
 
     await VuViec.update(
       { trangThaiYCTT: 3, ghiChuTuChoi: null, ...auditPayload },
-      { where: { id: { [Op.in]: eligibleIds } }, transaction: t }
+      { where: { id: { [Op.in]: eligibleIds } }, transaction: t },
     );
 
     const updatedRows = await VuViec.findAll({
@@ -453,8 +471,8 @@ export const approveYCTT = async (req, res) => {
       transaction: t,
     });
 
-    const updatedIds = updatedRows.map(r => r.id);
-    const skippedIds = idList.filter(x => !updatedIds.includes(x));
+    const updatedIds = updatedRows.map((r) => r.id);
+    const skippedIds = idList.filter((x) => !updatedIds.includes(x));
 
     await t.commit();
     return res.status(200).json({
@@ -473,7 +491,7 @@ export const approveYCTT = async (req, res) => {
 
 export const rejectYCTT = async (req, res) => {
   const { ids, id, reason, requireXuatBill = true } = req.body || {};
-  const idList = Array.isArray(ids) ? ids : (id ? [id] : []);
+  const idList = Array.isArray(ids) ? ids : id ? [id] : [];
 
   if (!idList.length) {
     return res.status(400).json({ message: "Thiếu id/ids để từ chối." });
@@ -500,11 +518,12 @@ export const rejectYCTT = async (req, res) => {
       lock: t.LOCK.UPDATE,
     });
 
-    const eligibleIds = rows.map(r => r.id);
+    const eligibleIds = rows.map((r) => r.id);
     if (eligibleIds.length === 0) {
       await t.rollback();
       return res.status(404).json({
-        message: "Không có bản ghi hợp lệ để từ chối (có thể đã duyệt hoặc đã từ chối).",
+        message:
+          "Không có bản ghi hợp lệ để từ chối (có thể đã duyệt hoặc đã từ chối).",
         updatedCount: 0,
         updatedIds: [],
         skippedIds: idList,
@@ -519,7 +538,7 @@ export const rejectYCTT = async (req, res) => {
 
     await VuViec.update(
       { trangThaiYCTT: 2, ...audit },
-      { where: { id: { [Op.in]: eligibleIds } }, transaction: t }
+      { where: { id: { [Op.in]: eligibleIds } }, transaction: t },
     );
 
     const updatedRows = await VuViec.findAll({
@@ -528,8 +547,8 @@ export const rejectYCTT = async (req, res) => {
       transaction: t,
     });
 
-    const updatedIds = updatedRows.map(r => r.id);
-    const skippedIds = idList.filter(x => !updatedIds.includes(x));
+    const updatedIds = updatedRows.map((r) => r.id);
+    const skippedIds = idList.filter((x) => !updatedIds.includes(x));
 
     await t.commit();
     return res.status(200).json({
@@ -560,7 +579,7 @@ export const updateVuViec = async (req, res) => {
       soTien,
       loaiTienTe,
       maNguoiXuLy,
-      isMainCase
+      isMainCase,
     } = req.body;
 
     // Tìm vụ việc theo id
@@ -593,15 +612,15 @@ export const updateVuViec = async (req, res) => {
         soTien,
         loaiTienTe,
         maNguoiXuLy,
-        isMainCase
+        isMainCase,
       },
-      { transaction }
+      { transaction },
     );
 
     await transaction.commit();
     return res.status(200).json({
       message: "Cập nhật vụ việc thành công",
-      vuViec
+      vuViec,
     });
   } catch (err) {
     await transaction.rollback();
@@ -609,4 +628,3 @@ export const updateVuViec = async (req, res) => {
     return res.status(500).json({ message: err.message });
   }
 };
-
