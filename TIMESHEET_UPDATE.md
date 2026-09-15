@@ -66,7 +66,7 @@ Khi lấy danh sách hoặc chi tiết nhân sự, FE sẽ nhận được trư�
 | Trường | Kiểu | Bắt buộc | Ý nghĩa |
 |---|---|---:|---|
 | `employeeCode` | String | Có | Mã nhân sự, tương ứng với `NhanSu.maNhanSu` |
-| `caseCode` | String | Có | Mã hồ sơ; hiện chỉ lưu chuỗi, chưa đối chiếu với bảng hồ sơ |
+| `caseCode` | String | Không | Mã hồ sơ chung; công việc không thuộc đơn/hồ sơ có thể để trống |
 | `workDate` | String | Có | Ngày làm việc, định dạng `YYYY-MM-DD` |
 | `hours` | Number | Có | Số giờ làm việc, lớn hơn `0`, tối đa `24` |
 | `activity` | String | Có | Tên hoạt động, ví dụ `Nộp đơn`, `Tra cứu thông tin` |
@@ -379,7 +379,7 @@ Không thể xóa Timesheet có trạng thái `APPROVED` hoặc `LOCKED`.
 | `REJECTED` | Từ chối |
 | `LOCKED` | Đã chốt |
 
-Hiện backend tạo mới với trạng thái `APPROVED` và khóa sửa/xóa khi trạng thái là `APPROVED` hoặc `LOCKED`. Do đó Timesheet vừa tạo sẽ không được sửa hoặc xóa qua API hiện tại.
+Hiện backend tạo mới với trạng thái `APPROVED`. Tạm thời Timesheet vẫn được phép sửa và xóa, kể cả khi đang ở trạng thái `APPROVED`; chức năng khóa sửa/xóa sẽ bổ sung sau khi triển khai quy trình duyệt chính thức.
 
 ---
 

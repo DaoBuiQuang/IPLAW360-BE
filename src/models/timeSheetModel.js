@@ -13,7 +13,7 @@ export const TimeSheet = sequelize.define("TimeSheet", {
     },
     caseCode: {
         type: DataTypes.STRING,
-        allowNull: false,
+        allowNull: true,
     },
     workDate: {
         type: DataTypes.DATEONLY,

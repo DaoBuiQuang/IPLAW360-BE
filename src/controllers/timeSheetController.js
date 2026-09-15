@@ -94,7 +94,7 @@ export const getCaseCodeOptions = async (req, res) => {
 export const createTimeSheet = async (req, res) => {
     try {
         const {
-            employeeCode,
+            employeeCode: requestedEmployeeCode,
             caseCode,
             workDate,
             hours,
@@ -102,10 +102,23 @@ export const createTimeSheet = async (req, res) => {
             description,
             notes,
         } = req.body;
+        const employeeCode = req.user?.maNhanSu;
 
-        if (!employeeCode || !caseCode || !workDate || !activity) {
+        if (!employeeCode) {
+            return res.status(401).json({
+                message: "Không xác định được nhân sự từ tài khoản đăng nhập",
+            });
+        }
+
+        if (requestedEmployeeCode && requestedEmployeeCode !== employeeCode) {
+            return res.status(403).json({
+                message: "Bạn chỉ được tạo logtime cho tài khoản của mình",
+            });
+        }
+
+        if (!workDate || !activity) {
             return res.status(400).json({
-                message: "Nhân sự, mã hồ sơ, ngày làm việc và hoạt động là bắt buộc",
+                message: "Ngày làm việc và hoạt động là bắt buộc",
             });
         }
 
@@ -117,7 +130,7 @@ export const createTimeSheet = async (req, res) => {
 
         const timeSheet = await TimeSheet.create({
             employeeCode,
-            caseCode,
+            caseCode: caseCode || null,
             workDate,
             activity,
             description,
@@ -142,10 +155,6 @@ export const updateTimeSheet = async (req, res) => {
         const { id } = req.body;
         const timeSheet = await TimeSheet.findByPk(id);
         if (!timeSheet) return res.status(404).json({ message: "Timesheet không tồn tại" });
-        if (["APPROVED", "LOCKED"].includes(timeSheet.status)) {
-            return res.status(400).json({ message: "Timesheet đã duyệt hoặc chốt, không thể chỉnh sửa" });
-        }
-
         const employeeCode = req.body.employeeCode ?? timeSheet.employeeCode;
         const caseCode = req.body.caseCode ?? timeSheet.caseCode;
         const employee = await getEmployee(employeeCode);
@@ -240,10 +249,6 @@ export const deleteTimeSheet = async (req, res) => {
         const { id } = req.body;
         const timeSheet = await TimeSheet.findByPk(id);
         if (!timeSheet) return res.status(404).json({ message: "Timesheet không tồn tại" });
-        if (["APPROVED", "LOCKED"].includes(timeSheet.status)) {
-            return res.status(400).json({ message: "Timesheet đã duyệt hoặc chốt, không thể xóa" });
-        }
-
         await timeSheet.destroy();
         return res.status(200).json({ message: "Xóa timesheet thành công" });
     } catch (error) {
