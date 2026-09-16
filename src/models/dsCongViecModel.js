@@ -1,6 +1,16 @@
 import { DataTypes } from "sequelize";
 import { sequelize } from "../config/db.js";
 
+/**
+ * Chuẩn hóa chuỗi mô tả: cắt khoảng trắng 2 đầu và viết hoa chữ cái đầu tiên
+ */
+export const capitalizeFirstLetter = (str) => {
+  if (!str || typeof str !== "string") return str;
+  const trimmed = str.trim();
+  if (!trimmed) return "";
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+};
+
 export const DanhSachCongViec = sequelize.define(
   "DanhSachCongViec",
   {
@@ -48,22 +58,22 @@ export const DanhSachCongViec = sequelize.define(
       },
     ],
     hooks: {
-      // Chuẩn hóa maVietTat: trim + UPPER trước khi tạo mới
+      // Chuẩn hóa maVietTat (trim + UPPER) và moTa (trim + viết hoa chữ cái đầu) trước khi tạo mới
       beforeCreate: (record) => {
         if (record.maVietTat) {
           record.maVietTat = record.maVietTat.trim().toUpperCase();
         }
         if (record.moTa) {
-          record.moTa = record.moTa.trim();
+          record.moTa = capitalizeFirstLetter(record.moTa);
         }
       },
-      // Chuẩn hóa maVietTat: trim + UPPER trước khi cập nhật
+      // Chuẩn hóa maVietTat (trim + UPPER) và moTa (trim + viết hoa chữ cái đầu) trước khi cập nhật
       beforeUpdate: (record) => {
         if (record.maVietTat) {
           record.maVietTat = record.maVietTat.trim().toUpperCase();
         }
         if (record.moTa) {
-          record.moTa = record.moTa.trim();
+          record.moTa = capitalizeFirstLetter(record.moTa);
         }
       },
     },

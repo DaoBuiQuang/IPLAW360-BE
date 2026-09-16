@@ -1,20 +1,21 @@
 import { Op } from "sequelize";
-import { DanhSachCongViec } from "../models/dsCongViecModel.js";
+import { DanhSachCongViec, capitalizeFirstLetter } from "../models/dsCongViecModel.js";
 import { NhanSu } from "../models/nhanSuModel.js";
 
 // ---------------------------------------------------------------------------
-// Helper: Chuẩn hóa đầu vào (trim + UPPER cho maVietTat, trim cho moTa)
+// Helper: Chuẩn hóa đầu vào (trim + UPPER cho maVietTat, trim + viết hoa chữ cái đầu cho moTa)
 // (Hooks trong model đã xử lý khi save; hàm này dùng để kiểm tra trùng lặp)
 // ---------------------------------------------------------------------------
 const normalize = (maVietTat, moTa) => ({
   maVietTatNorm: maVietTat ? maVietTat.trim().toUpperCase() : undefined,
-  moTaNorm: moTa ? moTa.trim() : undefined,
+  moTaNorm: moTa ? capitalizeFirstLetter(moTa) : undefined,
 });
 
 // ---------------------------------------------------------------------------
 // CREATE — Thêm một công việc vào Danh sách công việc thường nhật
 // ---------------------------------------------------------------------------
 export const createDanhSachCongViec = async (req, res) => {
+  let maVietTatNorm = '';
   try {
     const { maVietTat, moTa, maNhanSu: bodyMaNhanSu } = req.body;
 
@@ -24,29 +25,39 @@ export const createDanhSachCongViec = async (req, res) => {
       });
     }
 
-    // Ưu tiên maNhanSu từ token đăng nhập; fallback sang body nếu không có
     const maNhanSu = req.user?.maNhanSu ?? bodyMaNhanSu ?? null;
+    const norm = normalize(maVietTat, moTa);
+    maVietTatNorm = norm.maVietTatNorm;
 
-    const { maVietTatNorm } = normalize(maVietTat);
-
-    // Kiểm tra trùng lặp: cùng maNhanSu + maVietTat (bỏ qua bản ghi đã xóa mềm)
-    const duplicate = await DanhSachCongViec.findOne({
+    // Tìm kiếm cả bản ghi đang hoạt động và bản ghi đã xóa mềm (paranoid: false)
+    const existing = await DanhSachCongViec.findOne({
       where: {
         maNhanSu: maNhanSu ?? null,
         maVietTat: maVietTatNorm,
       },
-      paranoid: true, // chỉ tìm trong bản ghi chưa xóa
+      paranoid: false,
     });
 
-    if (duplicate) {
-      return res.status(409).json({
-        message: `Mã viết tắt "${maVietTatNorm}" đã tồn tại trong danh sách của bạn`,
-      });
+    if (existing) {
+      if (existing.deletedAt) {
+        // Đã từng tồn tại nhưng bị xóa mềm -> Khôi phục và cập nhật mô tả mới
+        await existing.restore();
+        existing.moTa = capitalizeFirstLetter(moTa);
+        await existing.save();
+        return res.status(200).json({
+          message: `Mã công việc "${maVietTatNorm}" đã từng tồn tại và vừa được khôi phục thành công!`,
+          data: existing,
+        });
+      } else {
+        return res.status(409).json({
+          message: `Mã viết tắt "${maVietTatNorm}" đã tồn tại trong danh sách của bạn. Vui lòng chọn mã khác.`,
+        });
+      }
     }
 
     const newItem = await DanhSachCongViec.create({
-      maVietTat,  // hook beforeCreate sẽ tự chuẩn hóa
-      moTa,
+      maVietTat: maVietTatNorm,
+      moTa: capitalizeFirstLetter(moTa),
       maNhanSu,
     });
 
@@ -55,11 +66,19 @@ export const createDanhSachCongViec = async (req, res) => {
       data: newItem,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({
+        message: `Mã viết tắt "${maVietTatNorm || 'này'}" đã tồn tại trong danh sách của bạn. Vui lòng chọn mã khác.`,
+      });
+    }
+    if (error.name === 'SequelizeValidationError') {
+      const msg = error.errors?.[0]?.message || 'Dữ liệu nhập vào không hợp lệ. Vui lòng kiểm tra lại.';
+      return res.status(400).json({ message: msg });
+    }
+    return res.status(500).json({ message: error.message || 'Lỗi xử lý thêm công việc trên máy chủ' });
   }
 };
 
-// ---------------------------------------------------------------------------
 // READ — Lấy toàn bộ danh sách (có phân trang, lọc, tìm kiếm)
 // ---------------------------------------------------------------------------
 export const listDanhSachCongViec = async (req, res) => {
@@ -146,6 +165,7 @@ export const getDanhSachCongViecById = async (req, res) => {
 // UPDATE — Cập nhật mã viết tắt hoặc mô tả công việc
 // ---------------------------------------------------------------------------
 export const updateDanhSachCongViec = async (req, res) => {
+  let maVietTatNorm = '';
   try {
     const { id, maVietTat, moTa } = req.body;
 
@@ -154,28 +174,28 @@ export const updateDanhSachCongViec = async (req, res) => {
       return res.status(404).json({ message: "Không tìm thấy công việc" });
     }
 
-    // Nếu maVietTat thay đổi → kiểm tra trùng lặp
     if (maVietTat) {
-      const { maVietTatNorm } = normalize(maVietTat);
+      const norm = normalize(maVietTat);
+      maVietTatNorm = norm.maVietTatNorm;
       const duplicate = await DanhSachCongViec.findOne({
         where: {
           maNhanSu: item.maNhanSu ?? null,
           maVietTat: maVietTatNorm,
-          id: { [Op.ne]: id }, // bỏ qua chính bản ghi đang sửa
+          id: { [Op.ne]: id },
         },
-        paranoid: true,
+        paranoid: false,
       });
 
       if (duplicate) {
         return res.status(409).json({
-          message: `Mã viết tắt "${maVietTatNorm}" đã tồn tại trong danh sách của bạn`,
+          message: `Mã viết tắt "${maVietTatNorm}" đã tồn tại trong danh sách của bạn. Vui lòng chọn mã khác.`,
         });
       }
 
-      item.maVietTat = maVietTat; // hook beforeUpdate sẽ tự chuẩn hóa
+      item.maVietTat = maVietTatNorm;
     }
 
-    if (moTa !== undefined) item.moTa = moTa;
+    if (moTa !== undefined) item.moTa = capitalizeFirstLetter(moTa);
 
     await item.save();
 
@@ -184,11 +204,19 @@ export const updateDanhSachCongViec = async (req, res) => {
       data: item,
     });
   } catch (error) {
-    return res.status(500).json({ message: error.message });
+    if (error.name === 'SequelizeUniqueConstraintError') {
+      return res.status(409).json({
+        message: `Mã viết tắt "${maVietTatNorm || 'này'}" đã tồn tại trong danh sách của bạn. Vui lòng chọn mã khác.`,
+      });
+    }
+    if (error.name === 'SequelizeValidationError') {
+      const msg = error.errors?.[0]?.message || 'Dữ liệu nhập vào không hợp lệ. Vui lòng kiểm tra lại.';
+      return res.status(400).json({ message: msg });
+    }
+    return res.status(500).json({ message: error.message || 'Lỗi xử lý cập nhật công việc trên máy chủ' });
   }
 };
 
-// ---------------------------------------------------------------------------
 // SOFT DELETE — Xóa mềm (paranoid: true), bản ghi vẫn còn trong DB
 // Các TimeSheet đã dùng mã này sẽ không bị lỗi truy xuất
 // ---------------------------------------------------------------------------
