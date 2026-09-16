@@ -52,7 +52,10 @@ app.use(cors());
 // Swagger documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customCss: '.swagger-ui .topbar { display: none }',
-  customSiteTitle: "DATN API Documentation"
+  customSiteTitle: "DATN API Documentation",
+  swaggerOptions: {
+    persistAuthorization: true
+  }
 }));
 
 // Xuất OpenAPI spec dạng JSON thô — dùng cho AI IDE (Cursor, Copilot, v.v.)
