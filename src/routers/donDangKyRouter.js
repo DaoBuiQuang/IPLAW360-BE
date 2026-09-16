@@ -301,4 +301,58 @@ router.post("/application/export-excel", authenticateUser, exportApplicationsToE
  */
 router.post("/application/guq", getApplicationsByGUQ);
 
+/**
+ * @swagger
+ * /application/getMaKhachHangByMaHoSoVuViec:
+ *   post:
+ *     summary: Lấy mã khách hàng theo mã hồ sơ vụ việc
+ *     tags: [Application]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - maHoSoVuViec
+ *             properties:
+ *               maHoSoVuViec:
+ *                 type: string
+ *                 example: "HSVV001"
+ *     responses:
+ *       200:
+ *         description: Lấy mã khách hàng thành công
+ *       400:
+ *         description: Thiếu mã hồ sơ vụ việc
+ *       404:
+ *         description: Không tìm thấy hồ sơ vụ việc
+ */
+router.post("/application/getMaKhachHangByMaHoSoVuViec", getMaKhachHangByMaHoSoVuViec);
+
+/**
+ * @swagger
+ * /application/getApplicationByGiayUyQuyenGoc:
+ *   post:
+ *     summary: Lấy danh sách đơn theo giấy ủy quyền gốc của khách hàng
+ *     tags: [Application]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - maKhachHang
+ *             properties:
+ *               maKhachHang:
+ *                 type: string
+ *                 example: "KH001"
+ *     responses:
+ *       200:
+ *         description: Lấy danh sách đơn thành công
+ *       400:
+ *         description: Thiếu mã khách hàng
+ */
+router.post("/application/getApplicationByGiayUyQuyenGoc", getApplicationsByMaKhachHang);
+
 export default router;

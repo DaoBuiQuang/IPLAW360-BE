@@ -15,9 +15,46 @@ const options = {
     },
     servers: [
       {
+        url: '/api',
+        description: 'Máy chủ hiện tại (Current Host / Localhost & LAN)'
+      },
+      {
         url: 'http://localhost:3000/api',
-        description: 'Development server'
+        description: 'Development Server (Localhost)'
       }
+    ],
+    tags: [
+      { name: 'Authentication', description: 'Đăng nhập, đăng ký và quản lý phiên' },
+      { name: 'Application', description: 'Quản lý Đơn đăng ký nhãn hiệu Việt Nam' },
+      { name: 'Application KH', description: 'Quản lý Đơn đăng ký nhãn hiệu Khách hàng nước ngoài' },
+      { name: 'Application GH VN', description: 'Đơn gia hạn nhãn hiệu Việt Nam' },
+      { name: 'Application GH KH', description: 'Đơn gia hạn nhãn hiệu Khách hàng' },
+      { name: 'Application SD VN', description: 'Đơn sửa đổi nhãn hiệu Việt Nam' },
+      { name: 'Application SD KH', description: 'Đơn sửa đổi nhãn hiệu Khách hàng' },
+      { name: 'Application SD GCN VN', description: 'Đơn sửa đổi GCN nhãn hiệu Việt Nam' },
+      { name: 'Application Tách Đơn', description: 'Đơn tách nhãn hiệu Việt Nam & Khách hàng' },
+      { name: 'GCN Nhãn hiệu', description: 'Giấy chứng nhận nhãn hiệu' },
+      { name: 'Văn bằng', description: 'Quản lý văn bằng bảo hộ' },
+      { name: 'Affidavit', description: 'Tờ khai sử dụng nhãn hiệu (Affidavit)' },
+      { name: 'Giấy ủy quyền', description: 'Quản lý giấy ủy quyền (Power of Attorney)' },
+      { name: 'Đề nghị thanh toán', description: 'Quản lý đề nghị thanh toán' },
+      { name: 'Tư vấn chung', description: 'Quản lý hồ sơ tư vấn chung' },
+      { name: 'Nhóm khách hàng', description: 'Quản lý nhóm khách hàng' },
+      { name: 'Người liên hệ', description: 'Quản lý người liên hệ' },
+      { name: 'Staff', description: 'Quản lý nhân sự' },
+      { name: 'Customer', description: 'Quản lý khách hàng' },
+      { name: 'Partner', description: 'Quản lý đối tác' },
+      { name: 'Case', description: 'Quản lý hồ sơ vụ việc' },
+      { name: 'Task', description: 'Quản lý vụ việc và công việc' },
+      { name: 'Brand', description: 'Quản lý nhãn hiệu' },
+      { name: 'Country', description: 'Quản lý quốc gia' },
+      { name: 'Products and Services', description: 'Quản lý nhóm sản phẩm / dịch vụ' },
+      { name: 'Timesheet', description: 'Chấm công và ghi nhận thời gian vụ việc' },
+      { name: 'Upload', description: 'Upload và tải tệp tài liệu' },
+      { name: 'Rollback', description: 'Xem lịch sử và hoàn tác thay đổi' },
+      { name: 'Dashboard', description: 'Thống kê tổng quan hạn xử lý' },
+      { name: 'Notification', description: 'Thông báo Firebase Cloud Messaging' },
+      { name: 'Document', description: 'Quản lý tệp và tài liệu' }
     ],
     components: {
       securitySchemes: {
