@@ -55,6 +55,13 @@ app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customSiteTitle: "DATN API Documentation"
 }));
 
+// Xuất OpenAPI spec dạng JSON thô — dùng cho AI IDE (Cursor, Copilot, v.v.)
+app.get('/api-docs.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.send(swaggerSpec);
+});
+
 app.get('/', (req, res)=>{
   return res.send('hello word');
 })
