@@ -35,6 +35,7 @@ import nguoiLienHeRouter from "./src/routers/nguoiLienHeRouter.js"
 import giayUyQuyenRouter from "./src/routers/giayUyQuyenRouter.js"
 import donTachRouter from "./src/routers/donTachRouter.js"
 import timeSheetRouter from "./src/routers/timeSheetRouter.js"
+import dsCongViecRouter from "./src/routers/dsCongViecRouter.js"
 // import nganhNgheRouter from "./src/routers/nganhNgheRouter.js"
 import { connectDB } from "./src/config/db.js";
 import { syncDatabase } from "./src/models/index.js";
@@ -51,8 +52,18 @@ app.use(cors());
 // Swagger documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customCss: '.swagger-ui .topbar { display: none }',
-  customSiteTitle: "DATN API Documentation"
+  customSiteTitle: "DATN API Documentation",
+  swaggerOptions: {
+    persistAuthorization: true
+  }
 }));
+
+// Xuất OpenAPI spec dạng JSON thô — dùng cho AI IDE (Cursor, Copilot, v.v.)
+app.get('/api-docs.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.send(swaggerSpec);
+});
 
 app.get('/', (req, res)=>{
   return res.send('hello word');
@@ -91,6 +102,7 @@ app.use("/api", nguoiLienHeRouter);
 app.use("/api", giayUyQuyenRouter);
 app.use("/api", donTachRouter);
 app.use("/api", timeSheetRouter);
+app.use("/api", dsCongViecRouter);
 connectDB();
 syncDatabase();
 const PORT = process.env.PORT || 3000;

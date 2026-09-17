@@ -5,8 +5,58 @@ import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.j
 const router = express.Router();
 
 // router.post("/application_sd_nh_vn/list",authenticateUser, authorizeRoles("admin", "staff"), getAllApplication_SD_VN);
-router.post("/application_sd_nh_vn/add",authenticateUser, authorizeRoles("admin", "staff"), addApplicationSDNHVN);
-router.post("/application_sd_nh_vn/list",authenticateUser, authorizeRoles("admin", "staff"), getAllApplicationSD_VN);
+/**
+ * @swagger
+ * /application_sd_nh_vn/add:
+ *   post:
+ *     summary: Tạo đơn sửa đổi nhãn hiệu Việt Nam mới
+ *     tags: [Application SD VN]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - maHoSo
+ *             properties:
+ *               maHoSo:
+ *                 type: string
+ *                 example: "HSVV001"
+ *               soDon:
+ *                 type: string
+ *                 example: "4-2024-SD001"
+ *     responses:
+ *       201:
+ *         description: Tạo đơn sửa đổi thành công
+ *       400:
+ *         description: Dữ liệu không hợp lệ
+ */
+router.post("/application_sd_nh_vn/add", authenticateUser, authorizeRoles("admin", "staff"), addApplicationSDNHVN);
+
+/**
+ * @swagger
+ * /application_sd_nh_vn/list:
+ *   post:
+ *     summary: Lấy danh sách đơn sửa đổi nhãn hiệu Việt Nam
+ *     tags: [Application SD VN]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/ApplicationListRequest'
+ *     responses:
+ *       200:
+ *         description: Lấy danh sách thành công
+ *       401:
+ *         description: Không có quyền truy cập
+ */
+router.post("/application_sd_nh_vn/list", authenticateUser, authorizeRoles("admin", "staff"), getAllApplicationSD_VN);
 
 // router.post("/application_sd_nh_vn/detail",authenticateUser, authorizeRoles("admin", "staff"), getApplicationById_SD_VN);
 // router.post("/application_sd_nh_vn/fulldetail",authenticateUser,authorizeRoles("admin", "staff"), getFullApplicationDetail_GH_VN);
