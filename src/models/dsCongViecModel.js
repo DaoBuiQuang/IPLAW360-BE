@@ -21,14 +21,14 @@ export const DanhSachCongViec = sequelize.define(
     },
     // Mã viết tắt công việc (VD: "NĐ", "GQ") — tự động UPPER + trim trước khi lưu
     maVietTat: {
-      type: DataTypes.STRING(20),
+      type: DataTypes.STRING(100),
       allowNull: false,
-      comment: "Mã viết tắt công việc, VD: NĐ, GQ",
+      comment: "Mã viết tắt công việc, VD: NĐ, GQ, NỘP ĐƠN",
     },
     // Mô tả đầy đủ của công việc
     moTa: {
       type: DataTypes.STRING(500),
-      allowNull: false,
+      allowNull: true,
       comment: "Mô tả chi tiết công việc",
     },
     // Nhân sự tạo ra danh mục này (FK → NhanSu.maNhanSu)

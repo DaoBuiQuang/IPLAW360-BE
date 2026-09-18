@@ -19,9 +19,9 @@ export const createDanhSachCongViec = async (req, res) => {
   try {
     const { maVietTat, moTa, maNhanSu: bodyMaNhanSu } = req.body;
 
-    if (!maVietTat || !moTa) {
+    if (!maVietTat) {
       return res.status(400).json({
-        message: "Mã viết tắt và mô tả công việc là bắt buộc",
+        message: "Mã viết tắt công việc là bắt buộc",
       });
     }
 

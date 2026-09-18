@@ -103,6 +103,7 @@ export const createTimeSheet = async (req, res) => {
             notes,
         } = req.body;
         const employeeCode = req.user?.maNhanSu;
+        const currentUserRole = req.user?.role;
 
         if (!employeeCode) {
             return res.status(401).json({
@@ -110,11 +111,13 @@ export const createTimeSheet = async (req, res) => {
             });
         }
 
-        if (requestedEmployeeCode && requestedEmployeeCode !== employeeCode) {
+        if (currentUserRole !== "admin" && requestedEmployeeCode && requestedEmployeeCode !== employeeCode) {
             return res.status(403).json({
                 message: "Bạn chỉ được tạo logtime cho tài khoản của mình",
             });
         }
+
+        const finalEmployeeCode = (currentUserRole === "admin" && requestedEmployeeCode) ? requestedEmployeeCode : employeeCode;
 
         if (!workDate || !activity) {
             return res.status(400).json({
@@ -122,14 +125,14 @@ export const createTimeSheet = async (req, res) => {
             });
         }
 
-        const employee = await getEmployee(employeeCode);
+        const employee = await getEmployee(finalEmployeeCode);
         if (!employee) return res.status(404).json({ message: "Nhân sự không tồn tại" });
 
         const workData = parseWorkData(req.body, employee);
         if (workData.error) return res.status(400).json({ message: workData.error });
 
         const timeSheet = await TimeSheet.create({
-            employeeCode,
+            employeeCode: finalEmployeeCode,
             caseCode: caseCode || null,
             workDate,
             activity,
@@ -155,6 +158,13 @@ export const updateTimeSheet = async (req, res) => {
         const { id } = req.body;
         const timeSheet = await TimeSheet.findByPk(id);
         if (!timeSheet) return res.status(404).json({ message: "Timesheet không tồn tại" });
+
+        const currentUserRole = req.user?.role;
+        const currentUserId = req.user?.maNhanSu;
+        if (currentUserRole !== "admin" && timeSheet.employeeCode !== currentUserId) {
+            return res.status(403).json({ message: "Bạn chỉ được chỉnh sửa timesheet của chính mình" });
+        }
+
         const employeeCode = req.body.employeeCode ?? timeSheet.employeeCode;
         const caseCode = req.body.caseCode ?? timeSheet.caseCode;
         const employee = await getEmployee(employeeCode);
@@ -249,6 +259,13 @@ export const deleteTimeSheet = async (req, res) => {
         const { id } = req.body;
         const timeSheet = await TimeSheet.findByPk(id);
         if (!timeSheet) return res.status(404).json({ message: "Timesheet không tồn tại" });
+
+        const currentUserRole = req.user?.role;
+        const currentUserId = req.user?.maNhanSu;
+        if (currentUserRole !== "admin" && timeSheet.employeeCode !== currentUserId) {
+            return res.status(403).json({ message: "Bạn chỉ được xóa timesheet của chính mình" });
+        }
+
         await timeSheet.destroy();
         return res.status(200).json({ message: "Xóa timesheet thành công" });
     } catch (error) {
