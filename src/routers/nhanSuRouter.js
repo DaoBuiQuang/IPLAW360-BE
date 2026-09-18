@@ -208,5 +208,5 @@ router.post("/staff/delete",authenticateUser,authorizeRoles("admin"), deleteNhan
  *       401:
  *         description: Không có quyền truy cập
  */
-router.post("/staff/basiclist",authenticateUser,authorizeRoles("admin"), getNhanSuBasicList)
+router.post("/staff/basiclist",authenticateUser,authorizeRoles("admin", "staff"), getNhanSuBasicList)
 export default router;
