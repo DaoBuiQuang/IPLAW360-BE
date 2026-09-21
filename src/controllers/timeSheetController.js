@@ -8,6 +8,9 @@ import { GCN_NH_KH } from "../models/GCN_NH_KHModel.js";
 import { TuVanChung_VN } from "../models/tuVanChung_VNModel.js";
 import { TuVanChung_KH } from "../models/tuVanChung_KHModel.js";
 import { DonDKBanQuyenTG_VH } from "../models/DonDKBanQuyenTG_VH.js";
+import { QuocGia } from "../models/quocGiaModel.js";
+import { DoiTac } from "../models/doiTacModel.js";
+import { KhachHangCuoi } from "../models/khanhHangCuoiModel.js";
 
 const getEmployee = async (employeeCode) => {
     if (!employeeCode) return null;
@@ -31,15 +34,26 @@ const parseWorkData = (body, employee) => {
 
 const enrichTimeSheets = async (timeSheets) => {
     const employeeCodes = [...new Set(timeSheets.map(item => item.employeeCode))];
-    const employees = await NhanSu.findAll({
-        where: { maNhanSu: { [Op.in]: employeeCodes } },
-        attributes: ["maNhanSu", "hoTen", "phongBan"],
-    });
+    const countryCodes = [...new Set(timeSheets.map(item => item.countryCode).filter(Boolean))];
+    const partnerCodes = [...new Set(timeSheets.map(item => item.partnerCode).filter(Boolean))];
+    const customerCodes = [...new Set(timeSheets.map(item => item.customerCode).filter(Boolean))];
+    const [employees, countries, partners, customers] = await Promise.all([
+        NhanSu.findAll({ where: { maNhanSu: { [Op.in]: employeeCodes } }, attributes: ["maNhanSu", "hoTen", "phongBan"] }),
+        countryCodes.length ? QuocGia.findAll({ where: { maQuocGia: { [Op.in]: countryCodes } }, attributes: ["maQuocGia", "tenQuocGia"] }) : [],
+        partnerCodes.length ? DoiTac.findAll({ where: { maDoiTac: { [Op.in]: partnerCodes } }, attributes: ["maDoiTac", "tenDoiTac"] }) : [],
+        customerCodes.length ? KhachHangCuoi.findAll({ where: { maKhachHang: { [Op.in]: customerCodes } }, attributes: ["maKhachHang", "tenKhachHang"] }) : [],
+    ]);
     const employeeMap = new Map(employees.map(employee => [employee.maNhanSu, employee.toJSON()]));
+    const countryMap = new Map(countries.map(item => [item.maQuocGia, item.tenQuocGia]));
+    const partnerMap = new Map(partners.map(item => [item.maDoiTac, item.tenDoiTac]));
+    const customerMap = new Map(customers.map(item => [item.maKhachHang, item.tenKhachHang]));
 
     return timeSheets.map(item => ({
         ...item.toJSON(),
         employee: employeeMap.get(item.employeeCode) || null,
+        countryName: countryMap.get(item.countryCode) || null,
+        partnerName: partnerMap.get(item.partnerCode) || null,
+        customerName: customerMap.get(item.customerCode) || null,
     }));
 };
 
@@ -96,6 +110,9 @@ export const createTimeSheet = async (req, res) => {
         const {
             employeeCode: requestedEmployeeCode,
             caseCode,
+            countryCode,
+            partnerCode,
+            customerCode,
             workDate,
             hours,
             activity,
@@ -134,6 +151,9 @@ export const createTimeSheet = async (req, res) => {
         const timeSheet = await TimeSheet.create({
             employeeCode: finalEmployeeCode,
             caseCode: caseCode || null,
+            countryCode: countryCode || null,
+            partnerCode: partnerCode || null,
+            customerCode: customerCode || null,
             workDate,
             activity,
             description,
@@ -175,7 +195,7 @@ export const updateTimeSheet = async (req, res) => {
         }, employee);
         if (workData.error) return res.status(400).json({ message: workData.error });
 
-        const fields = ["employeeCode", "caseCode", "workDate", "activity", "description", "notes"];
+        const fields = ["employeeCode", "caseCode", "countryCode", "partnerCode", "customerCode", "workDate", "activity", "description", "notes"];
         for (const field of fields) {
             if (req.body[field] !== undefined) timeSheet[field] = req.body[field];
         }
@@ -223,7 +243,8 @@ export const listTimeSheets = async (req, res) => {
         const size = Math.min(Math.max(Number(pageSize), 1), 100);
         const where = {};
 
-        if (employeeCode) where.employeeCode = employeeCode;
+        if (req.user?.role === "staff") where.employeeCode = req.user.maNhanSu;
+        else if (employeeCode) where.employeeCode = employeeCode;
         if (caseCode) where.caseCode = caseCode;
         if (status) where.status = status;
         if (activity) where.activity = { [Op.like]: `%${activity}%` };
@@ -299,7 +320,8 @@ export const getTimeSheetSummary = async (req, res) => {
     try {
         const { employeeCode, caseCode, fromDate, toDate, status } = req.body;
         const where = {};
-        if (employeeCode) where.employeeCode = employeeCode;
+        if (req.user?.role === "staff") where.employeeCode = req.user.maNhanSu;
+        else if (employeeCode) where.employeeCode = employeeCode;
         if (caseCode) where.caseCode = caseCode;
         if (status) where.status = status;
         if (fromDate || toDate) {

@@ -15,6 +15,18 @@ export const TimeSheet = sequelize.define("TimeSheet", {
         type: DataTypes.STRING,
         allowNull: true,
     },
+    countryCode: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
+    partnerCode: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
+    customerCode: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
     workDate: {
         type: DataTypes.DATEONLY,
         allowNull: false,
@@ -76,6 +88,9 @@ export const TimeSheet = sequelize.define("TimeSheet", {
     indexes: [
         { fields: ["employeeCode"] },
         { fields: ["caseCode"] },
+        { fields: ["countryCode"] },
+        { fields: ["partnerCode"] },
+        { fields: ["customerCode"] },
         { fields: ["workDate"] },
         { fields: ["status"] },
     ],
