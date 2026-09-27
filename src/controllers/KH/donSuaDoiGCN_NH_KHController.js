@@ -114,6 +114,7 @@ export const addApplicationSD_GCN_NHKH = async (req, res) => {
         const gcnMoi = await GCN_NH_KH.create(
             {
                 ...gcnData,
+                maHoSo: maHoSo || gcnData.maHoSo,
                 loaiBang: 2, // bằng sửa đổi
                 idKhachHang: idKhachHangMoi,
                 bangGoc: 0, // bằng sửa đổi mới giữ 0

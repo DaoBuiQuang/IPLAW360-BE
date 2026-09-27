@@ -61,6 +61,15 @@ export const TimeSheet = sequelize.define("TimeSheet", {
             min: 0,
         },
     },
+    contributionPercentage: {
+        type: DataTypes.DECIMAL(5, 2),
+        allowNull: false,
+        defaultValue: 100.00,
+        validate: {
+            min: 0,
+            max: 100,
+        },
+    },
     status: {
         type: DataTypes.STRING(30),
         allowNull: false,

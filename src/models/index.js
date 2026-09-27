@@ -206,8 +206,37 @@ DonDK_SPDV_KH.belongsTo(DonDangKyNhanHieu_KH, {
 DonDangKyNhanHieu_KH.hasMany(TaiLieu_KH, { foreignKey: 'maDonDangKy', as: 'taiLieuChuaNop_KH' });
 TaiLieu_KH.belongsTo(DonDangKyNhanHieu_KH, { foreignKey: 'maDonDangKy' });
 export const syncDatabase = async () => {
-    await sequelize.sync();
-    console.log("✅ Database synchronized with all models");
+    try {
+        await sequelize.sync();
+        console.log("✅ Database synchronized with all models");
+        // Safe check and add contributionPercentage column to TimeSheets if not exists
+        try {
+            await sequelize.query(`
+                ALTER TABLE TimeSheets ADD COLUMN contributionPercentage DECIMAL(5, 2) NOT NULL DEFAULT 100.00;
+            `);
+            console.log("✅ Added column contributionPercentage to TimeSheets table");
+        } catch (colErr) {
+            // Error code 1060 (ER_DUP_FIELDNAME) means column already exists
+            if (colErr.original?.errno !== 1060 && colErr.parent?.errno !== 1060) {
+                // Column might already exist or other DB dialect, ignore silently
+            }
+        }
+
+        // Update legacy records where contributionPercentage is NULL and enforce default
+        try {
+            await sequelize.query(`
+                UPDATE TimeSheets SET contributionPercentage = 100.00 WHERE contributionPercentage IS NULL;
+            `);
+            await sequelize.query(`
+                ALTER TABLE TimeSheets MODIFY COLUMN contributionPercentage DECIMAL(5, 2) NOT NULL DEFAULT 100.00;
+            `);
+            console.log("✅ Updated legacy TimeSheets records with default 100.00 contributionPercentage");
+        } catch (updateErr) {
+            // Ignore if already set or dialect not matching
+        }
+    } catch (err) {
+        console.error("Database sync error:", err);
+    }
 };
 DonDangKyNhanHieu_KH.belongsTo(NhanHieu, {
     foreignKey: "maNhanHieu",

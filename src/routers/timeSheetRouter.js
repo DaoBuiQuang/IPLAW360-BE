@@ -8,6 +8,7 @@ import {
     getTimeSheetsByCase,
     getTimeSheetSummary,
     getCaseCodeOptions,
+    checkCaseContributions,
 } from "../controllers/timeSheetController.js";
 import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.js";
 
@@ -171,6 +172,38 @@ router.post("/timesheet/summary", authenticateUser, getTimeSheetSummary);
 
 /**
  * @swagger
+ * /timesheet/contribution-check:
+ *   post:
+ *     summary: Kiểm tra và giám sát các hồ sơ có tổng tỉ lệ đóng góp vượt quá 100%
+ *     tags: [TimeSheet]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               caseCode:
+ *                 type: string
+ *                 example: "VV001"
+ *               fromDate:
+ *                 type: string
+ *                 format: date
+ *               toDate:
+ *                 type: string
+ *                 format: date
+ *     responses:
+ *       200:
+ *         description: Lấy danh sách hồ sơ vượt 100% đóng góp thành công
+ *       401:
+ *         description: Không có quyền truy cập
+ */
+router.post("/timesheet/contribution-check", authenticateUser, checkCaseContributions);
+
+/**
+ * @swagger
  * /timesheet/add:
  *   post:
  *     summary: Tạo timesheet (log time)
@@ -204,6 +237,12 @@ router.post("/timesheet/summary", authenticateUser, getTimeSheetSummary);
  *               maCongViec:
  *                 type: string
  *                 example: "CV001"
+ *               contributionPercentage:
+ *                 type: number
+ *                 minimum: 0
+ *                 maximum: 100
+ *                 example: 50.0
+ *                 description: Phần trăm tỉ lệ đóng góp vào vụ việc (0 - 100)
  *     responses:
  *       201:
  *         description: Tạo thành công
@@ -212,13 +251,13 @@ router.post("/timesheet/summary", authenticateUser, getTimeSheetSummary);
  *       401:
  *         description: Không có quyền truy cập
  */
-router.post("/timesheet/add", authenticateUser, authorizeRoles(...managerRoles), createTimeSheet);
+router.post("/timesheet/add", authenticateUser, createTimeSheet);
 
 /**
  * @swagger
  * /timesheet/edit:
  *   put:
- *     summary: Cập nhật timesheet
+ *     summary: Cập nhật timesheet (chỉ chủ sở hữu được sửa)
  *     tags: [TimeSheet]
  *     security:
  *       - bearerAuth: []
@@ -241,21 +280,30 @@ router.post("/timesheet/add", authenticateUser, authorizeRoles(...managerRoles),
  *                 format: date
  *               moTa:
  *                 type: string
+ *               contributionPercentage:
+ *                 type: number
+ *                 minimum: 0
+ *                 maximum: 100
+ *                 example: 50.0
+ *                 description: Phần trăm tỉ lệ đóng góp vào vụ việc (0 - 100)
  *     responses:
  *       200:
  *         description: Cập nhật thành công
  *       401:
  *         description: Không có quyền truy cập
+ *       403:
+ *         description: Bạn chỉ có quyền chỉnh sửa Time Record của chính mình.
  *       404:
  *         description: Không tìm thấy timesheet
  */
-router.put("/timesheet/edit", authenticateUser, authorizeRoles(...managerRoles), updateTimeSheet);
+router.put("/timesheet/edit", authenticateUser, updateTimeSheet);
+router.post("/timesheet/edit", authenticateUser, updateTimeSheet);
 
 /**
  * @swagger
  * /timesheet/delete:
  *   delete:
- *     summary: Xóa timesheet
+ *     summary: Xóa timesheet (chỉ chủ sở hữu được xóa)
  *     tags: [TimeSheet]
  *     security:
  *       - bearerAuth: []
@@ -276,9 +324,12 @@ router.put("/timesheet/edit", authenticateUser, authorizeRoles(...managerRoles),
  *         description: Xóa thành công
  *       401:
  *         description: Không có quyền truy cập
+ *       403:
+ *         description: Bạn chỉ có quyền xóa Time Record của chính mình.
  *       404:
  *         description: Không tìm thấy timesheet
  */
-router.delete("/timesheet/delete", authenticateUser, authorizeRoles(...managerRoles), deleteTimeSheet);
+router.delete("/timesheet/delete", authenticateUser, deleteTimeSheet);
+router.post("/timesheet/delete", authenticateUser, deleteTimeSheet);
 
 export default router;

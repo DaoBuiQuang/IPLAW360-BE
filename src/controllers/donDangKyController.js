@@ -544,6 +544,7 @@ export const createApplication = async (req, res) => {
         if (
             donData.soBang
         ) {
+            const actualMaHoSo = maHoSo || donData.maHoSoVuViec || newDon.maHoSo || newDon.maHoSoVuViec || null;
             const gcnData = {
                 maDonDangKy: newDon.maDonDangKy,
                 soBang: donData.soBang || null,
@@ -553,7 +554,8 @@ export const createApplication = async (req, res) => {
                 ngayGuiBangChoKhachHang: donData.ngayGuiBangChoKhachHang || null,
                 idKhachHang: donData.idKhachHang || null,
                 idDoiTac: donData.idDoiTac || null,
-                maHoSo,
+                maHoSo: actualMaHoSo,
+                soDon: newDon.soDon || donData.soDon || null,
                 clientsRef: donData.clientsRef || null,
                 maNhanHieu: donData.maNhanHieu,
                 maQuocGia: "VN",
@@ -782,6 +784,7 @@ export const updateApplication = async (req, res) => {
         if (
             updateData.soBang
         ) {
+            const actualMaHoSo = maHoSo || updateData.maHoSoVuViec || don.maHoSo || don.maHoSoVuViec || null;
             if (don.idGCN_NH) {
                 const gcn = await GCN_NH.findByPk(don.idGCN_NH, { transaction: t });
                 if (gcn) {
@@ -798,7 +801,7 @@ export const updateApplication = async (req, res) => {
                         idDoiTac: don.idDoiTac,
                         ngayNopDon: don.ngayNopDon,
                         clientsRef: don.clientsRef,
-                        maHoSo
+                        maHoSo: actualMaHoSo || gcn.maHoSo
                     }, { transaction: t });
                 }
                 idGCN_NH = don.idGCN_NH;
@@ -813,7 +816,7 @@ export const updateApplication = async (req, res) => {
                     ngayGuiBangChoKhachHang: updateData.ngayGuiBangChoKhachHang || null,
                     idKhachHang: don.idKhachHang,
                     idDoiTac: don.idDoiTac,
-                    maHoSo,
+                    maHoSo: actualMaHoSo,
                     clientsRef: don.clientsRef,
                     maNhanHieu: maNhanHieu,
                     maQuocGia: "VN",
