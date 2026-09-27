@@ -52,20 +52,33 @@ export const generateCustomerCode = async (req, res) => {
 
 export const getCustomerNamesAndCodes = async (req, res) => {
   try {
-    const { tenKhachHang } = req.body;
+    const { tenKhachHang, searchText, query } = req.body;
+    const searchVal = String(tenKhachHang || searchText || query || "").trim();
     const whereCondition = { daXoa: false };
-    if (tenKhachHang) {
-      whereCondition.tenKhachHang = { [Op.like]: `%${tenKhachHang}%` };
+
+    if (searchVal) {
+      const tokens = searchVal.split(/\s+/).filter(Boolean);
+      if (tokens.length === 1) {
+        whereCondition[Op.or] = [
+          { tenKhachHang: { [Op.like]: `%${tokens[0]}%` } },
+          { maKhachHang: { [Op.like]: `%${tokens[0]}%` } },
+        ];
+      } else if (tokens.length > 1) {
+        whereCondition[Op.and] = tokens.map(tok => ({
+          [Op.or]: [
+            { tenKhachHang: { [Op.like]: `%${tok}%` } },
+            { maKhachHang: { [Op.like]: `%${tok}%` } },
+          ]
+        }));
+      }
     }
 
     const customers = await KhachHangCuoi.findAll({
       where: whereCondition,
       attributes: ["id", 'maKhachHang', 'tenKhachHang'],
+      order: [["tenKhachHang", "ASC"]],
+      limit: req.body?.limit ? Number(req.body.limit) : 100,
     });
-
-    if (!customers.length) {
-      return res.status(404).json({ message: "Không tìm thấy khách hàng nào" });
-    }
 
     res.status(200).json(customers);
   } catch (error) {

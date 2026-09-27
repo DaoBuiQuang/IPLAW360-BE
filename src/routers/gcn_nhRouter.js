@@ -1,8 +1,35 @@
 import express from "express";
 
 import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.js";
-import {  addGCN_NH_Cam, addGCN_NH_VN, editGCN_NH_CAM, editGCN_NH_VN, getGCN_NH_CAMDetail, getGCN_NHDetail, getGCN_NHs, getGCN_NHs_SD, getGCN_NHsCAM, getGCN_NHsCAM_SD } from "../controllers/gcn_nhController.js";
+import {  addGCN_NH_Cam, addGCN_NH_VN, editGCN_NH_CAM, editGCN_NH_VN, getGCN_NH_CAMDetail, getGCN_NHDetail, getGCN_NHs, getGCN_NHs_SD, getGCN_NHsCAM, getGCN_NHsCAM_SD, getGCNOptions } from "../controllers/gcn_nhController.js";
 const router = express.Router();
+
+/**
+ * @swagger
+ * /gcn_nh/options:
+ *   post:
+ *     summary: Gợi ý tìm kiếm nhanh Giấy chứng nhận (Số bằng / Mã hồ sơ / Nhãn hiệu)
+ *     tags: [GCN Nhãn hiệu]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               searchText:
+ *                 type: string
+ *               limit:
+ *                 type: integer
+ *                 default: 20
+ *     responses:
+ *       200:
+ *         description: Gợi ý thành công
+ */
+router.post("/gcn_nh/options", authenticateUser, getGCNOptions);
+
 /**
  * @swagger
  * /gcn_nh/list:

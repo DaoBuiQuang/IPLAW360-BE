@@ -3,43 +3,59 @@ import { NhanHieu } from "../models/nhanHieuModel.js";
 // Lấy tất cả nhãn hiệu (có tìm kiếm)
 export const getAllNhanHieu = async (req, res) => {
     try {
-        const { search } = req.body;
-        let nhanHieus;
+        const { search, searchText, tenNhanHieu } = req.body || {};
+        const query = String(search || searchText || tenNhanHieu || "").trim();
+        const where = {};
 
-        if (search) {
-            nhanHieus = await NhanHieu.findAll({
-                where: {
-                    tenNhanHieu: {
-                        [Op.like]: `%${search}%`
-                    }
-                }
-            });
-        } else {
-            nhanHieus = await NhanHieu.findAll();
+        if (query) {
+            const tokens = query.split(/\s+/).filter(Boolean);
+            if (tokens.length === 1) {
+                where.tenNhanHieu = { [Op.like]: `%${tokens[0]}%` };
+            } else if (tokens.length > 1) {
+                where[Op.and] = tokens.map(tok => ({
+                    tenNhanHieu: { [Op.like]: `%${tok}%` }
+                }));
+            }
         }
 
-        if (nhanHieus.length === 0) {
-            return res.status(404).json({ message: "Không có nhãn hiệu nào" });
-        }
+        const nhanHieus = await NhanHieu.findAll({
+            where,
+            order: [["tenNhanHieu", "ASC"]],
+        });
 
         res.status(200).json(nhanHieus);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
 };
+
 export const getShortListNhanHieu = async (req, res) => {
     try {
-        let nhanHieus;
+        const { search, searchText, tenNhanHieu, limit } = req.body || {};
+        const query = String(search || searchText || tenNhanHieu || "").trim();
+        const where = {};
+
+        if (query) {
+            const tokens = query.split(/\s+/).filter(Boolean);
+            if (tokens.length === 1) {
+                where.tenNhanHieu = { [Op.like]: `%${tokens[0]}%` };
+            } else if (tokens.length > 1) {
+                where[Op.and] = tokens.map(tok => ({
+                    tenNhanHieu: { [Op.like]: `%${tok}%` }
+                }));
+            }
+        }
 
         const queryOptions = {
-            attributes: ["maNhanHieu", "tenNhanHieu"], 
+            where,
+            attributes: ["maNhanHieu", "tenNhanHieu"],
+            order: [["tenNhanHieu", "ASC"]],
         };
-
-        nhanHieus = await NhanHieu.findAll(queryOptions);
-
-        if (nhanHieus.length === 0) {
-            return res.status(404).json({ message: "Không có nhãn hiệu nào" });
+        if (limit) {
+            queryOptions.limit = Math.min(Math.max(Number(limit) || 20, 1), 200);
         }
+
+        const nhanHieus = await NhanHieu.findAll(queryOptions);
 
         res.status(200).json(nhanHieus);
     } catch (error) {

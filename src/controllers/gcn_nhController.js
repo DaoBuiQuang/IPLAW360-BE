@@ -1499,3 +1499,84 @@ export const editGCN_NH_VN = async (req, res) => {
         res.status(500).json({ message: "Lỗi server", error: error.message });
     }
 };
+
+export const getGCNOptions = async (req, res) => {
+    try {
+        const { searchText = "", limit = 20 } = req.body;
+        const maxLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+        const search = String(searchText).trim();
+        const tokens = search ? search.split(/\s+/).filter(Boolean) : [];
+
+        const queryGCNModel = async (Model) => {
+            const where = { bangGoc: { [Op.ne]: 1 } };
+            if (tokens.length > 0) {
+                where[Op.and] = tokens.map(tok => {
+                    const normTok = tok.replace(/-/g, "");
+                    return {
+                        [Op.or]: [
+                            { soBang: { [Op.like]: `%${tok}%` } },
+                            Sequelize.literal(`REPLACE(soBang, '-', '') LIKE '%${normTok}%'`),
+                            { soDon: { [Op.like]: `%${tok}%` } },
+                            Sequelize.literal(`REPLACE(soDon, '-', '') LIKE '%${normTok}%'`),
+                            { maHoSo: { [Op.like]: `%${tok}%` } },
+                            Sequelize.literal(`REPLACE(maHoSo, '-', '') LIKE '%${normTok}%'`),
+                            Sequelize.literal(`\`NhanHieu\`.\`tenNhanHieu\` LIKE '%${tok}%'`),
+                        ]
+                    };
+                });
+            }
+
+            return await Model.findAll({
+                where,
+                attributes: ["soBang", "maHoSo", "soDon"],
+                include: [
+                    {
+                        model: NhanHieu,
+                        as: "NhanHieu",
+                        attributes: ["tenNhanHieu"],
+                        required: false,
+                    }
+                ],
+                limit: maxLimit * 2,
+                order: [["updatedAt", "DESC"]],
+                raw: false,
+            }).catch(err => {
+                console.error("Lỗi getGCNOptions query:", err?.message);
+                return [];
+            });
+        };
+
+        const [vnGCNs, khGCNs] = await Promise.all([
+            queryGCNModel(GCN_NH),
+            queryGCNModel(GCN_NH_KH),
+        ]);
+
+        const combined = [...vnGCNs, ...khGCNs];
+        const seen = new Set();
+        const data = [];
+
+        for (const item of combined) {
+            const soBang = item.soBang || "";
+            const maHoSoVuViec = item.maHoSo || item.soDon || "";
+            const tenNhanHieu = item.NhanHieu?.tenNhanHieu || "";
+
+            const key = `${soBang}__${maHoSoVuViec}__${tenNhanHieu}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                data.push({
+                    soBang,
+                    maHoSoVuViec,
+                    tenNhanHieu,
+                });
+            }
+            if (data.length >= maxLimit) break;
+        }
+
+        return res.status(200).json({
+            success: true,
+            data,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+};
