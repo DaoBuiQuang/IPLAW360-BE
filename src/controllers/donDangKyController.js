@@ -744,7 +744,7 @@ export const createApplication = async (req, res) => {
                 message: e.message,
             }));
             console.log("❌ SequelizeValidationError:", messages);
-            return res.status(400).json({ message: "Validation error", errors: messages });
+            return res.status(400).json({ message: "Dữ liệu không hợp lệ", errors: messages });
         } else {
             console.error("❌ Lỗi khác:", err);
             return res.status(500).json({ message: err.message });
@@ -1156,7 +1156,7 @@ export const updateApplication = async (req, res) => {
                 message: e.message,
             }));
             console.log("❌ SequelizeValidationError:", messages);
-            return res.status(400).json({ message: "Validation error", errors: messages });
+            return res.status(400).json({ message: "Dữ liệu không hợp lệ", errors: messages });
         } else {
             console.error("❌ Lỗi khác:", error);
             return res.status(500).json({ message: error.message });

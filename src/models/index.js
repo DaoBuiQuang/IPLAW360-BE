@@ -67,6 +67,7 @@ import { DonTachNH_VN } from "./VN_TachDon_NH/donTachNH_VNModel.js";
 import { DonTachNH_KH } from "./KH_TachDon_NH/donTachNH_KHModel.js";
 import { TimeSheet } from "./timeSheetModel.js";
 import { DanhSachCongViec } from "./dsCongViecModel.js";
+import { NhomNhanSu } from "./nhomNhanSuModel.js";
 
 Auth.belongsTo(NhanSu, {
     foreignKey: 'maNhanSu',
@@ -500,6 +501,29 @@ NhanSu.hasMany(DanhSachCongViec, {
     as: "danhSachCongViec",
 });
 
+// ========= Quan hệ NhomNhanSu (Team) =========
+// Manager (NhanSu) quản lý nhiều thành viên qua NhomNhanSu
+NhomNhanSu.belongsTo(NhanSu, {
+    foreignKey: "managerCode",
+    targetKey: "maNhanSu",
+    as: "manager",
+});
+NhomNhanSu.belongsTo(NhanSu, {
+    foreignKey: "maNhanSu",
+    targetKey: "maNhanSu",
+    as: "thanhVien",
+});
+NhanSu.hasMany(NhomNhanSu, {
+    foreignKey: "managerCode",
+    sourceKey: "maNhanSu",
+    as: "nhomQuanLy",
+});
+NhanSu.hasMany(NhomNhanSu, {
+    foreignKey: "maNhanSu",
+    sourceKey: "maNhanSu",
+    as: "nhomThamGia",
+});
+
 export {
     sequelize,
     NganhNghe,
@@ -533,5 +557,6 @@ export {
     DonTachNH_VN,
     DonTachNH_KH,
     TimeSheet,
-    DanhSachCongViec
+    DanhSachCongViec,
+    NhomNhanSu,
 };

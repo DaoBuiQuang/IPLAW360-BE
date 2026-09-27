@@ -9,11 +9,14 @@ import {
     getTimeSheetSummary,
     getCaseCodeOptions,
     checkCaseContributions,
+    getTimesheetKPI,
+    getOfficeSummary,
 } from "../controllers/timeSheetController.js";
 import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
-const managerRoles = ["admin", "staff"];
+// Vai trò có quyền quản lý (admin, manager)
+const adminAndManagerRoles = ["admin", "manager"];
 
 /**
  * @swagger
@@ -55,9 +58,20 @@ router.post("/timesheet/case-options", authenticateUser, getCaseCodeOptions);
  *           schema:
  *             type: object
  *             properties:
- *               maNhanSu:
+ *               employeeCode:
  *                 type: string
- *               maVuViec:
+ *               teamManagerCode:
+ *                 type: string
+ *                 description: "Lọc theo toàn bộ team của một Manager (Chỉ Admin/CEO)"
+ *               caseCode:
+ *                 type: string
+ *               status:
+ *                 type: string
+ *               activity:
+ *                 type: string
+ *               customerCode:
+ *                 type: string
+ *               partnerCode:
  *                 type: string
  *               fromDate:
  *                 type: string
@@ -154,7 +168,18 @@ router.post("/timesheet/by-case", authenticateUser, getTimeSheetsByCase);
  *           schema:
  *             type: object
  *             properties:
- *               maNhanSu:
+ *               employeeCode:
+ *                 type: string
+ *               teamManagerCode:
+ *                 type: string
+ *                 description: "Lọc theo team của Manager (Admin truyền mã manager, Manager tự động lấy team mình)"
+ *               caseCode:
+ *                 type: string
+ *               customerCode:
+ *                 type: string
+ *               partnerCode:
+ *                 type: string
+ *               status:
  *                 type: string
  *               fromDate:
  *                 type: string
@@ -331,5 +356,89 @@ router.post("/timesheet/edit", authenticateUser, updateTimeSheet);
  */
 router.delete("/timesheet/delete", authenticateUser, deleteTimeSheet);
 router.post("/timesheet/delete", authenticateUser, deleteTimeSheet);
+
+/**
+ * @swagger
+ * /timesheet/kpi:
+ *   post:
+ *     summary: KPI tổng hợp timesheet theo kỳ (NV/Manager/Admin)
+ *     tags: [TimeSheet]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               employeeCode:
+ *                 type: string
+ *                 nullable: true
+ *               teamManagerCode:
+ *                 type: string
+ *                 nullable: true
+ *               period:
+ *                 type: string
+ *                 enum: [week, month, quarter, year]
+ *                 default: month
+ *               year:
+ *                 type: integer
+ *               month:
+ *                 type: integer
+ *                 nullable: true
+ *               week:
+ *                 type: integer
+ *                 nullable: true
+ *               quarter:
+ *                 type: integer
+ *                 nullable: true
+ *     responses:
+ *       200:
+ *         description: Lấy KPI thành công
+ *       401:
+ *         description: Không có quyền truy cập
+ */
+router.post("/timesheet/kpi", authenticateUser, getTimesheetKPI);
+
+/**
+ * @swagger
+ * /timesheet/office-summary:
+ *   post:
+ *     summary: Tổng hợp KPI toàn công ty theo kỳ (CEO/Admin only)
+ *     tags: [TimeSheet]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               period:
+ *                 type: string
+ *                 enum: [week, month, quarter, year]
+ *                 default: month
+ *               year:
+ *                 type: integer
+ *               month:
+ *                 type: integer
+ *                 nullable: true
+ *               week:
+ *                 type: integer
+ *                 nullable: true
+ *               quarter:
+ *                 type: integer
+ *                 nullable: true
+ *     responses:
+ *       200:
+ *         description: Lấy tổng hợp thành công
+ *       401:
+ *         description: Không có quyền truy cập
+ *       403:
+ *         description: Chỉ Admin/CEO mới có quyền truy cập
+ */
+router.post("/timesheet/office-summary", authenticateUser, authorizeRoles("admin"), getOfficeSummary);
 
 export default router;

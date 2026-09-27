@@ -36,6 +36,7 @@ import giayUyQuyenRouter from "./src/routers/giayUyQuyenRouter.js"
 import donTachRouter from "./src/routers/donTachRouter.js"
 import timeSheetRouter from "./src/routers/timeSheetRouter.js"
 import dsCongViecRouter from "./src/routers/dsCongViecRouter.js"
+import nhomNhanSuRouter from "./src/routers/nhomNhanSuRouter.js"
 // import nganhNgheRouter from "./src/routers/nganhNgheRouter.js"
 import { connectDB } from "./src/config/db.js";
 import { syncDatabase } from "./src/models/index.js";
@@ -65,9 +66,9 @@ app.get('/api-docs.json', (req, res) => {
   res.send(swaggerSpec);
 });
 
-app.get('/', (req, res)=>{
-  return res.send('hello word');
-})
+app.get('/', (req, res) => {
+  return res.send('Hello World');
+});
 app.use("/api", authRouter)
 app.use("/api", nhanSuRouter)
 app.use("/api", quocGiaRouter)
@@ -103,6 +104,7 @@ app.use("/api", giayUyQuyenRouter);
 app.use("/api", donTachRouter);
 app.use("/api", timeSheetRouter);
 app.use("/api", dsCongViecRouter);
+app.use("/api", nhomNhanSuRouter);
 connectDB();
 syncDatabase();
 const PORT = process.env.PORT || 3000;
