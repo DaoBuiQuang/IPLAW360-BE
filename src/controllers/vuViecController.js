@@ -424,7 +424,7 @@ export const approveYCTT = async (req, res) => {
   const idList = Array.isArray(ids) ? ids : id ? [id] : [];
 
   if (!idList.length) {
-    return res.status(400).json({ message: "Thiếu id/ids để duyệt." });
+    return res.status(400).json({ message: "Vui lòng cung cấp danh sách mã vụ việc cần duyệt." });
   }
 
   // 🔧 dùng instance từ model thay vì biến 'sequelize'
@@ -494,10 +494,10 @@ export const rejectYCTT = async (req, res) => {
   const idList = Array.isArray(ids) ? ids : id ? [id] : [];
 
   if (!idList.length) {
-    return res.status(400).json({ message: "Thiếu id/ids để từ chối." });
+    return res.status(400).json({ message: "Vui lòng cung cấp danh sách mã vụ việc cần từ chối." });
   }
   if (!reason || !String(reason).trim()) {
-    return res.status(400).json({ message: "Thiếu lý do từ chối (reason)." });
+    return res.status(400).json({ message: "Vui lòng nhập lý do từ chối." });
   }
 
   const t = await VuViec.sequelize.transaction();

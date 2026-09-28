@@ -1,6 +1,7 @@
 import { NhanSu } from "../models/nhanSuModel.js";
 import { Auth } from "../models/authModel.js";
-import { Sequelize } from "sequelize";
+import { NhomNhanSu } from "../models/nhomNhanSuModel.js";
+import { Sequelize, Op } from "sequelize";
 import { sendGenericNotification } from "../utils/notificationHelper.js";
 
 export const getNhanSuBasicList = async (req, res) => {
@@ -182,7 +183,7 @@ export const getNhanSuById = async (req, res) => {
             include: [{
                 model: Auth,
                 as: "Auth", // ✅ đúng alias
-                attributes: ["Username"],
+                attributes: ["Username", "Role"],
                 required: false
             }]
         });        
@@ -193,12 +194,169 @@ export const getNhanSuById = async (req, res) => {
         const data = nhanSu.toJSON();
         const response = {
             ...data,
-            tenTaiKhoan: data.Auth?.Username || null
+            tenTaiKhoan: data.Auth?.Username || null,
+            role: data.Auth?.Role || null
         };
         delete response.auth;
         res.status(200).json(response);
     } catch (error) {
         res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * GET/POST /staff/myteam
+ * Trả về danh sách nhân viên trong nhóm mà manager đang đăng nhập quản lý.
+ * - Nếu role là "admin" và có query managerCode → trả về team của manager đó
+ * - Nếu role là "manager" → tự động lấy managerCode từ JWT
+ */
+export const getMyTeam = async (req, res) => {
+    try {
+        const callerRole = String(req.user?.role || "").toLowerCase();
+        const callerCode = req.user?.maNhanSu;
+
+        // admin hoặc ceo có thể xem team của bất kỳ manager nào
+        let managerCode;
+        if (callerRole === "admin" || callerRole === "ceo") {
+            managerCode = req.body?.managerCode || req.query?.managerCode || callerCode;
+        } else {
+            managerCode = callerCode;
+        }
+
+        if (!managerCode) {
+            return res.status(400).json({ message: "Không xác định được mã Manager" });
+        }
+
+        // Lấy danh sách thành viên từ bảng NhomNhanSu
+        const nhomRecords = await NhomNhanSu.findAll({
+            where: { managerCode },
+            include: [
+                {
+                    model: NhanSu,
+                    as: "thanhVien",
+                    attributes: ["maNhanSu", "hoTen", "chucVu", "phongBan", "email", "sdt"],
+                    include: [
+                        {
+                            model: Auth,
+                            as: "Auth",
+                            attributes: ["Username", "Role"],
+                            required: false,
+                        },
+                    ],
+                },
+                {
+                    model: NhanSu,
+                    as: "manager",
+                    attributes: ["maNhanSu", "hoTen", "chucVu"],
+                },
+            ],
+        });
+
+        if (nhomRecords.length === 0) {
+            return res.status(200).json({
+                success: true,
+                managerCode,
+                members: [],
+                message: "Manager này chưa có thành viên trong nhóm",
+            });
+        }
+
+        const managerInfo = nhomRecords[0]?.manager?.toJSON() || null;
+
+        const members = nhomRecords.map((record) => {
+            const tv = record.thanhVien?.toJSON() || {};
+            return {
+                maNhanSu: tv.maNhanSu,
+                hoTen: tv.hoTen,
+                chucVu: tv.chucVu,
+                phongBan: tv.phongBan,
+                email: tv.email,
+                sdt: tv.sdt,
+                username: tv.Auth?.Username || null,
+                role: tv.Auth?.Role || null,
+                nhomId: record.id,
+                tenNhom: record.tenNhom || null,
+            };
+        });
+
+        return res.status(200).json({
+            success: true,
+            manager: managerInfo,
+            members,
+        });
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * POST /staff/update-role
+ * Thăng cấp / cập nhật vai trò cho nhân sự (Chỉ Admin)
+ * Body: { maNhanSu: string, role: "manager" | "staff" | "admin" | "trainee" }
+ * Logic: Cập nhật trường Role trong bảng Auth (TaiKhoan) của maNhanSu tương ứng
+ */
+export const updateStaffRole = async (req, res) => {
+    try {
+        const { maNhanSu, role } = req.body;
+
+        if (!maNhanSu || !role) {
+            return res.status(400).json({
+                success: false,
+                message: "Mã nhân sự (maNhanSu) và vai trò (role) là bắt buộc",
+            });
+        }
+
+        const allowedRoles = ["manager", "staff", "admin", "trainee"];
+        if (!allowedRoles.includes(role)) {
+            return res.status(400).json({
+                success: false,
+                message: `Vai trò không hợp lệ. Chỉ chấp nhận: ${allowedRoles.join(", ")}`,
+            });
+        }
+
+        const nhanSu = await NhanSu.findByPk(maNhanSu);
+        if (!nhanSu) {
+            return res.status(404).json({
+                success: false,
+                message: "Không tìm thấy nhân sự với mã đã cung cấp",
+            });
+        }
+
+        const auth = await Auth.findOne({ where: { maNhanSu } });
+        if (!auth) {
+            return res.status(404).json({
+                success: false,
+                message: "Nhân sự này chưa có tài khoản đăng nhập trong hệ thống",
+            });
+        }
+
+        // Bảo vệ tài khoản quản trị hệ thống gốc
+        if (maNhanSu === "admin" || auth.Username === "admin") {
+            if (role !== "admin") {
+                return res.status(400).json({
+                    success: false,
+                    message: "Không được phép thay đổi vai trò của tài khoản quản trị hệ thống gốc (admin)",
+                });
+            }
+        }
+
+        const oldRole = auth.Role;
+        auth.Role = role;
+        await auth.save();
+
+        return res.status(200).json({
+            success: true,
+            message: `Cập nhật vai trò cho nhân sự ${nhanSu.hoTen} (${maNhanSu}) thành "${role}" thành công`,
+            data: {
+                maNhanSu,
+                hoTen: nhanSu.hoTen,
+                username: auth.Username,
+                oldRole,
+                role: auth.Role,
+            },
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
     }
 };
 
