@@ -1,4 +1,5 @@
 import { Op } from "sequelize";
+import { sequelize } from "../config/db.js";
 import { TimeSheet } from "../models/timeSheetModel.js";
 import { NhanSu } from "../models/nhanSuModel.js";
 import { DonDangKy } from "../models/donDangKyModel.js";
@@ -14,6 +15,11 @@ import { QuocGia } from "../models/quocGiaModel.js";
 import { DoiTac } from "../models/doiTacModel.js";
 import { KhachHangCuoi } from "../models/khanhHangCuoiModel.js";
 
+export const roundDecimal = (num, decimals = 2) => {
+    if (num === null || num === undefined || isNaN(Number(num))) return 0;
+    return Number(Math.round(Number(num) + "e" + decimals) + "e-" + decimals);
+};
+
 const getEmployee = async (employeeCode) => {
     if (!employeeCode) return null;
     return NhanSu.findByPk(employeeCode);
@@ -27,10 +33,13 @@ const parseWorkData = (body, employee) => {
         return { error: "Số giờ làm việc phải lớn hơn 0 và không vượt quá 24 giờ" };
     }
 
+    const safeHours = roundDecimal(hours, 2);
+    const safeHourlyRate = roundDecimal(hourlyRate, 2);
+
     return {
-        hours,
-        hourlyRate,
-        totalAmount: hours * hourlyRate,
+        hours: safeHours,
+        hourlyRate: safeHourlyRate,
+        totalAmount: roundDecimal(safeHours * safeHourlyRate, 2),
     };
 };
 
@@ -423,10 +432,13 @@ export const getTimeSheetsByCase = async (req, res) => {
         });
         const data = await enrichTimeSheets(timeSheets);
         const summary = data.reduce((result, item) => {
-            result.totalHours += Number(item.hours);
-            result.totalAmount += Number(item.totalAmount);
+            result.totalHours += Number(item.hours) || 0;
+            result.totalAmount += Number(item.totalAmount) || 0;
             return result;
         }, { totalHours: 0, totalAmount: 0 });
+
+        summary.totalHours = roundDecimal(summary.totalHours, 2);
+        summary.totalAmount = roundDecimal(summary.totalAmount, 2);
 
         return res.status(200).json({ data, summary });
     } catch (error) {
@@ -455,8 +467,8 @@ export const getTimeSheetSummary = async (req, res) => {
 
         const caseContributions = {};
         const summary = rows.reduce((result, item) => {
-            result.totalHours += Number(item.hours);
-            result.totalAmount += Number(item.totalAmount);
+            result.totalHours += Number(item.hours) || 0;
+            result.totalAmount += Number(item.totalAmount) || 0;
             result.totalItems += 1;
 
             if (item.caseCode) {
@@ -476,11 +488,14 @@ export const getTimeSheetSummary = async (req, res) => {
             return result;
         }, { totalItems: 0, totalHours: 0, totalAmount: 0 });
 
+        summary.totalHours = roundDecimal(summary.totalHours, 2);
+        summary.totalAmount = roundDecimal(summary.totalAmount, 2);
+
         const overContributedCases = Object.values(caseContributions)
             .filter(item => item.totalContribution > 100)
             .map(item => ({
                 caseCode: item.caseCode,
-                totalContribution: Math.round(item.totalContribution * 100) / 100,
+                totalContribution: roundDecimal(item.totalContribution, 2),
                 employees: Array.from(item.employees),
             }));
 
