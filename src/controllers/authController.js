@@ -15,9 +15,9 @@ export const register = async (req, res) => {
             return res.status(400).json({ message: "Mã nhân sự, tên đăng nhập, mật khẩu và vai trò là bắt buộc" });
         }
 
-        const allowedRoles = ['admin', 'staff', 'trainee']; 
+        const allowedRoles = ['admin', 'staff', 'trainee', 'manager']; 
         if (!allowedRoles.includes(role)) {
-            return res.status(400).json({ message: "Vai trò không hợp lệ. Chỉ chấp nhận: admin, staff, trainee" });
+            return res.status(400).json({ message: "Vai trò không hợp lệ. Chỉ chấp nhận: admin, staff, trainee, manager" });
         }
 
         const existingUser = await Auth.findOne({ where: { Username: username } });
@@ -97,7 +97,7 @@ export const logout = async (req, res) => {
     return res.status(200).json({ message: "Đăng xuất thành công" });
   } catch (error) {
     console.error("Lỗi khi đăng xuất:", error);
-    return res.status(500).json({ message: "Lỗi server: " + error.message });
+    return res.status(500).json({ message: "Lỗi hệ thống: " + error.message });
   }
 };
 
@@ -106,15 +106,15 @@ export const changePassword = async (req, res) => {
         const { oldPassword, newPassword } = req.body;
         const authHeader = req.headers.authorization;
         if (!authHeader || !authHeader.startsWith("Bearer ")) {
-            return res.status(401).json({ message: "Không có token" });
+            return res.status(401).json({ message: "Không tìm thấy token xác thực, vui lòng đăng nhập" });
         }
 
         const token = authHeader.split(" ")[1];
         let decoded;
         try {
-            decoded = jwt.verify(token, "my_secret_key");
+            decoded = jwt.verify(token, process.env.JWT_SECRET || "my_secret_key");
         } catch (error) {
-            return res.status(401).json({ message: "Token không hợp lệ" });
+            return res.status(401).json({ message: "Token không hợp lệ hoặc đã hết hạn" });
         }
 
         const user = await Auth.findByPk(decoded.id);

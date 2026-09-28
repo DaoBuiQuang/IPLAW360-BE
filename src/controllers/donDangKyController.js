@@ -17,8 +17,20 @@ import { now } from "sequelize/lib/utils";
 import { DoiTac } from "../models/doiTacModel.js";
 import { GCN_NH } from "../models/GCN_NHModel.js";
 import { DonSuaDoi_NH_VN } from "../models/VN_SuaDoi_NH/donSuaDoiNH_VNModel.js";
+import { DonDangKyNhanHieu_KH } from "../models/KH/donDangKyNhanHieu_KHModel.js";
 import { GiayUyQuyen } from "../models/GiayUyQuyenModel.js";
 import ExcelJS from "exceljs";
+
+// Helper for token-based substring search (case-insensitive)
+const buildTokensSearch = (val, field) => {
+    if (!val) return undefined;
+    const tokens = String(val).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return undefined;
+    if (tokens.length === 1) return { [field]: { [Op.like]: `%${tokens[0]}%` } };
+    return {
+        [Op.and]: tokens.map(tok => ({ [field]: { [Op.like]: `%${tok}%` } }))
+    };
+};
 const tinhHanXuLy = async (app, transaction = null) => {
     console.log("tessttttt 1")
     if (app.soBang) return null;
@@ -176,15 +188,35 @@ export const getAllApplication = async (req, res) => {
 
         // ====== Tìm kiếm (soDon, maHoSoVuViec, clientsRef) ======
         if (searchText) {
-            const normalizedSearch = searchText.replace(/-/g, "");
-            whereCondition[Op.or] = [
-                { soDon: { [Op.like]: `%${searchText}%` } },
-                literal(`REPLACE(soDon, '-', '') LIKE '%${normalizedSearch}%'`),
-                { maHoSoVuViec: { [Op.like]: `%${searchText}%` } },
-                literal(`REPLACE(maHoSoVuViec, '-', '') LIKE '%${normalizedSearch}%'`),
-                { clientsRef: { [Op.like]: `%${searchText}%` } },
-                literal(`REPLACE(clientsRef, '-', '') LIKE '%${normalizedSearch}%'`),
-            ];
+            const raw = String(searchText).trim();
+            const tokens = raw.split(/\s+/).filter(Boolean);
+            const normalizedSearch = raw.replace(/-/g, "");
+
+            if (tokens.length <= 1) {
+                whereCondition[Op.or] = [
+                    { soDon: { [Op.like]: `%${raw}%` } },
+                    literal(`REPLACE(soDon, '-', '') LIKE '%${normalizedSearch}%'`),
+                    { maHoSoVuViec: { [Op.like]: `%${raw}%` } },
+                    literal(`REPLACE(maHoSoVuViec, '-', '') LIKE '%${normalizedSearch}%'`),
+                    { clientsRef: { [Op.like]: `%${raw}%` } },
+                    literal(`REPLACE(clientsRef, '-', '') LIKE '%${normalizedSearch}%'`),
+                ];
+            } else {
+                whereCondition[Op.and] = whereCondition[Op.and] || [];
+                tokens.forEach(tok => {
+                    const normTok = tok.replace(/-/g, "");
+                    whereCondition[Op.and].push({
+                        [Op.or]: [
+                            { soDon: { [Op.like]: `%${tok}%` } },
+                            literal(`REPLACE(soDon, '-', '') LIKE '%${normTok}%'`),
+                            { maHoSoVuViec: { [Op.like]: `%${tok}%` } },
+                            literal(`REPLACE(maHoSoVuViec, '-', '') LIKE '%${normTok}%'`),
+                            { clientsRef: { [Op.like]: `%${tok}%` } },
+                            literal(`REPLACE(clientsRef, '-', '') LIKE '%${normTok}%'`),
+                        ]
+                    });
+                });
+            }
         }
 
         // ====== Lọc theo ngày (selectedField) ======
@@ -312,27 +344,21 @@ export const getAllApplication = async (req, res) => {
                         as: "nhanHieu",
                         attributes: ["tenNhanHieu", "linkAnh"],
                         required: !!brandName,
-                        where: brandName
-                            ? { tenNhanHieu: { [Op.like]: `%${brandName}%` } }
-                            : undefined,
+                        where: buildTokensSearch(brandName, "tenNhanHieu"),
                     },
                     {
                         model: KhachHangCuoi,
                         as: "khachHang",
                         attributes: ["tenKhachHang"],
                         required: !!customerName,
-                        where: customerName
-                            ? { tenKhachHang: { [Op.like]: `%${customerName}%` } }
-                            : undefined,
+                        where: buildTokensSearch(customerName, "tenKhachHang"),
                     },
                     {
                         model: DoiTac,
                         as: "doitac",
                         attributes: ["tenDoiTac"],
                         required: !!partnerName,
-                        where: partnerName
-                            ? { tenDoiTac: { [Op.like]: `%${partnerName}%` } }
-                            : undefined,
+                        where: buildTokensSearch(partnerName, "tenDoiTac"),
                     },
                 ],
                 limit: pageSize,
@@ -544,6 +570,7 @@ export const createApplication = async (req, res) => {
         if (
             donData.soBang
         ) {
+            const actualMaHoSo = maHoSo || donData.maHoSoVuViec || newDon.maHoSo || newDon.maHoSoVuViec || null;
             const gcnData = {
                 maDonDangKy: newDon.maDonDangKy,
                 soBang: donData.soBang || null,
@@ -553,7 +580,8 @@ export const createApplication = async (req, res) => {
                 ngayGuiBangChoKhachHang: donData.ngayGuiBangChoKhachHang || null,
                 idKhachHang: donData.idKhachHang || null,
                 idDoiTac: donData.idDoiTac || null,
-                maHoSo,
+                maHoSo: actualMaHoSo,
+                soDon: newDon.soDon || donData.soDon || null,
                 clientsRef: donData.clientsRef || null,
                 maNhanHieu: donData.maNhanHieu,
                 maQuocGia: "VN",
@@ -716,7 +744,7 @@ export const createApplication = async (req, res) => {
                 message: e.message,
             }));
             console.log("❌ SequelizeValidationError:", messages);
-            return res.status(400).json({ message: "Validation error", errors: messages });
+            return res.status(400).json({ message: "Dữ liệu không hợp lệ", errors: messages });
         } else {
             console.error("❌ Lỗi khác:", err);
             return res.status(500).json({ message: err.message });
@@ -782,6 +810,7 @@ export const updateApplication = async (req, res) => {
         if (
             updateData.soBang
         ) {
+            const actualMaHoSo = maHoSo || updateData.maHoSoVuViec || don.maHoSo || don.maHoSoVuViec || null;
             if (don.idGCN_NH) {
                 const gcn = await GCN_NH.findByPk(don.idGCN_NH, { transaction: t });
                 if (gcn) {
@@ -798,7 +827,7 @@ export const updateApplication = async (req, res) => {
                         idDoiTac: don.idDoiTac,
                         ngayNopDon: don.ngayNopDon,
                         clientsRef: don.clientsRef,
-                        maHoSo
+                        maHoSo: actualMaHoSo || gcn.maHoSo
                     }, { transaction: t });
                 }
                 idGCN_NH = don.idGCN_NH;
@@ -813,7 +842,7 @@ export const updateApplication = async (req, res) => {
                     ngayGuiBangChoKhachHang: updateData.ngayGuiBangChoKhachHang || null,
                     idKhachHang: don.idKhachHang,
                     idDoiTac: don.idDoiTac,
-                    maHoSo,
+                    maHoSo: actualMaHoSo,
                     clientsRef: don.clientsRef,
                     maNhanHieu: maNhanHieu,
                     maQuocGia: "VN",
@@ -1127,7 +1156,7 @@ export const updateApplication = async (req, res) => {
                 message: e.message,
             }));
             console.log("❌ SequelizeValidationError:", messages);
-            return res.status(400).json({ message: "Validation error", errors: messages });
+            return res.status(400).json({ message: "Dữ liệu không hợp lệ", errors: messages });
         } else {
             console.error("❌ Lỗi khác:", error);
             return res.status(500).json({ message: error.message });
@@ -2031,4 +2060,83 @@ export const handleExportCSV = () => {
     link.click();
     document.body.removeChild(link);
     window.URL.revokeObjectURL(url);
+};
+
+export const getApplicationOptions = async (req, res) => {
+    try {
+        const { searchText = "", limit = 20 } = req.body;
+        const maxLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+        const search = String(searchText).trim();
+        const tokens = search ? search.split(/\s+/).filter(Boolean) : [];
+
+        const queryModel = async (Model) => {
+            const where = {};
+            if (tokens.length > 0) {
+                where[Op.and] = tokens.map(tok => {
+                    const normTok = tok.replace(/-/g, "");
+                    return {
+                        [Op.or]: [
+                            { soDon: { [Op.like]: `%${tok}%` } },
+                            literal(`REPLACE(soDon, '-', '') LIKE '%${normTok}%'`),
+                            { maHoSoVuViec: { [Op.like]: `%${tok}%` } },
+                            literal(`REPLACE(maHoSoVuViec, '-', '') LIKE '%${normTok}%'`),
+                            literal(`\`nhanHieu\`.\`tenNhanHieu\` LIKE '%${tok}%'`),
+                        ]
+                    };
+                });
+            }
+
+            return await Model.findAll({
+                where,
+                attributes: ["soDon", "maHoSoVuViec"],
+                include: [
+                    {
+                        model: NhanHieu,
+                        as: "nhanHieu",
+                        attributes: ["tenNhanHieu"],
+                        required: false,
+                    }
+                ],
+                limit: maxLimit * 2,
+                order: [["updatedAt", "DESC"]],
+                raw: false,
+            }).catch(err => {
+                console.error("Lỗi getApplicationOptions query:", err?.message);
+                return [];
+            });
+        };
+
+        const [vnDons, khDons] = await Promise.all([
+            queryModel(DonDangKy),
+            queryModel(DonDangKyNhanHieu_KH),
+        ]);
+
+        const combined = [...vnDons, ...khDons];
+        const seen = new Set();
+        const data = [];
+
+        for (const item of combined) {
+            const soDon = item.soDon || "";
+            const maHoSoVuViec = item.maHoSoVuViec || item.maHoSo || "";
+            const tenNhanHieu = item.nhanHieu?.tenNhanHieu || "";
+
+            const key = `${soDon}__${maHoSoVuViec}__${tenNhanHieu}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                data.push({
+                    soDon,
+                    maHoSoVuViec,
+                    tenNhanHieu,
+                });
+            }
+            if (data.length >= maxLimit) break;
+        }
+
+        return res.status(200).json({
+            success: true,
+            data,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
 };

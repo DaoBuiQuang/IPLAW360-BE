@@ -61,14 +61,32 @@ export const getPartners = async (req, res) => {
 
 export const getAllPartners = async (req, res) => {
     try {
+        const { tenDoiTac, searchText, query, maDoiTac } = req.body || {};
+        const searchVal = String(tenDoiTac || searchText || query || maDoiTac || "").trim();
+        const whereCondition = {};
+
+        if (searchVal) {
+            const tokens = searchVal.split(/\s+/).filter(Boolean);
+            if (tokens.length === 1) {
+                whereCondition[Op.or] = [
+                    { tenDoiTac: { [Op.like]: `%${tokens[0]}%` } },
+                    { maDoiTac: { [Op.like]: `%${tokens[0]}%` } },
+                ];
+            } else if (tokens.length > 1) {
+                whereCondition[Op.and] = tokens.map(tok => ({
+                    [Op.or]: [
+                        { tenDoiTac: { [Op.like]: `%${tok}%` } },
+                        { maDoiTac: { [Op.like]: `%${tok}%` } },
+                    ]
+                }));
+            }
+        }
+
         const partners = await DoiTac.findAll({
-            attributes: ["id","maDoiTac", "tenDoiTac", "maQuocGia", "diaChi", "sdt", "nguoiLienHe", "email", "moTa"],
+            where: whereCondition,
+            attributes: ["id", "maDoiTac", "tenDoiTac", "maQuocGia", "diaChi", "sdt", "nguoiLienHe", "email", "moTa"],
             order: [["tenDoiTac", "ASC"]],
         });
-        console.log(partners);
-        if (!partners.length) {
-            return res.status(404).json({ message: "Không có đối tác nào" });
-        }
 
         res.status(200).json(partners);
     } catch (error) {

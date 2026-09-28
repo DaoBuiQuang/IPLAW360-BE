@@ -9,6 +9,75 @@ import { KhachHangCuoi } from "../models/khanhHangCuoiModel.js";
 import { GCN_NH_KH } from "../models/GCN_NH_KHModel.js";
 import { VuViec } from "../models/vuViecModel.js";
 import { GiayUyQuyen } from "../models/GiayUyQuyenModel.js";
+import { DonDangKy } from "../models/donDangKyModel.js";
+import { DonDangKyNhanHieu_KH } from "../models/KH/donDangKyNhanHieu_KHModel.js";
+
+// Helper for token-based case-insensitive multi-word search
+const buildTokensSearchCondition = (value, fieldName) => {
+    if (!value) return undefined;
+    const tokens = String(value).trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return undefined;
+    if (tokens.length === 1) return { [fieldName]: { [Op.like]: `%${tokens[0]}%` } };
+    return {
+        [Op.and]: tokens.map(tok => ({ [fieldName]: { [Op.like]: `%${tok}%` } }))
+    };
+};
+
+const applySoBangSearch = (whereCondition, soBang) => {
+    if (!soBang) return;
+    const tokens = String(soBang).trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 1) {
+        whereCondition[Op.or] = [
+            { soBang: { [Op.like]: `%${tokens[0]}%` } },
+            { soDon: { [Op.like]: `%${tokens[0]}%` } },
+            { maHoSo: { [Op.like]: `%${tokens[0]}%` } },
+        ];
+    } else if (tokens.length > 1) {
+        whereCondition[Op.and] = whereCondition[Op.and] || [];
+        tokens.forEach(tok => {
+            whereCondition[Op.and].push({
+                [Op.or]: [
+                    { soBang: { [Op.like]: `%${tok}%` } },
+                    { soDon: { [Op.like]: `%${tok}%` } },
+                    { maHoSo: { [Op.like]: `%${tok}%` } },
+                ]
+            });
+        });
+    }
+};
+
+// Helper resolve maHoSo if missing or equal to soBang
+const resolveMaHoSoForGCNList = async (items, isCam = false) => {
+    const needLookup = items.filter(g => (!g.maHoSo || g.maHoSo === g.soBang) && (g.maDonDangKy || g.soDon));
+    const donMapByMaDon = new Map();
+    const donMapBySoDon = new Map();
+
+    if (needLookup.length > 0) {
+        const maDonList = [...new Set(needLookup.map(g => g.maDonDangKy).filter(Boolean))];
+        const soDonList = [...new Set(needLookup.map(g => g.soDon).filter(Boolean))];
+        const orConditions = [];
+        if (maDonList.length) orConditions.push({ maDonDangKy: { [Op.in]: maDonList } });
+        if (soDonList.length) orConditions.push({ soDon: { [Op.in]: soDonList } });
+
+        if (orConditions.length > 0) {
+            const Model = isCam ? DonDangKyNhanHieu_KH : DonDangKy;
+            const dons = await Model.findAll({
+                where: { [Op.or]: orConditions },
+                attributes: ["maDonDangKy", "soDon", "maHoSo", "maHoSoVuViec"],
+                raw: true,
+            }).catch(() => []);
+
+            for (const d of dons) {
+                const code = d.maHoSo || d.maHoSoVuViec;
+                if (d.maDonDangKy && code) donMapByMaDon.set(d.maDonDangKy, code);
+                if (d.soDon && code) donMapBySoDon.set(d.soDon, code);
+            }
+        }
+    }
+
+    return { donMapByMaDon, donMapBySoDon };
+};
+
 export const getGCN_NHs = async (req, res) => {
     try {
         const { soBang, pageIndex = 1, pageSize = 20, customerName,
@@ -17,71 +86,89 @@ export const getGCN_NHs = async (req, res) => {
         const offset = (pageIndex - 1) * pageSize;
 
         const whereCondition = {};
-        if (soBang) whereCondition.soBang = { [Op.like]: `%${soBang}%` };
+        applySoBangSearch(whereCondition, soBang);
         whereCondition.bangGoc = { [Op.ne]: 1 };
 
         const totalItems = await GCN_NH.count({ where: whereCondition });
 
         const GCN_NHs = await GCN_NH.findAll({
             where: whereCondition,
-            attributes: ["id", "soBang", "soDon", "maHoSo", "ngayNopDon", "ngayCapBang", "ghiChu", "dsNhomSPDV", "hanGiaHan", "ngayHetHanBang"],
+            attributes: [
+                "id",
+                "soBang",
+                "soDon",
+                "maHoSo",
+                "maDonDangKy",
+                "ngayNopDon",
+                "ngayCapBang",
+                "ghiChu",
+                "dsNhomSPDV",
+                "hanGiaHan",
+                "ngayHetHanBang",
+                "anhBang",
+                "clientsRef"
+            ],
             include: [
                 {
                     model: NhanHieu,
                     as: "NhanHieu",
                     attributes: ["tenNhanHieu", "linkAnh"],
                     required: !!brandName,
-                    where: brandName
-                        ? { tenNhanHieu: { [Op.like]: `%${brandName}%` } }
-                        : undefined
+                    where: buildTokensSearchCondition(brandName, "tenNhanHieu"),
                 },
                 {
                     model: KhachHangCuoi,
                     as: "KhachHangCuoi",
                     attributes: ["tenKhachHang"],
                     required: !!customerName,
-                    where: customerName
-                        ? { tenKhachHang: { [Op.like]: `%${customerName}%` } }
-                        : undefined,
+                    where: buildTokensSearchCondition(customerName, "tenKhachHang"),
                 },
                 {
                     model: DoiTac,
                     as: "DoiTac",
                     attributes: ["tenDoiTac"],
                     required: !!partnerName,
-                    where: partnerName
-                        ? { tenDoiTac: { [Op.like]: `%${partnerName}%` } }
-                        : undefined
+                    where: buildTokensSearchCondition(partnerName, "tenDoiTac"),
                 },
             ],
             limit: pageSize,
             offset: offset,
         });
 
-
         if (!GCN_NHs.length) {
             return res.status(404).json({ message: "Không có bằng nào phù hợp" });
         }
 
-        const result = GCN_NHs.map(gcn_nh => ({
-            id: gcn_nh.id,
-            soBang: gcn_nh.soBang,
-            soDon: gcn_nh.soDon,
-            maHoSo: gcn_nh.soBang,
-            tenKhachHang: gcn_nh.KhachHangCuoi?.tenKhachHang || "",
-            tenDoiTac: gcn_nh.DoiTac?.tenDoiTac || "",
-            tenNhanHieu: gcn_nh.NhanHieu?.tenNhanHieu || "",
-            linkAnh: gcn_nh.NhanHieu?.linkAnh || "",
-            clientRef: gcn_nh.clientRef,
-            ngayNopDon: gcn_nh.ngayNopDon,
-            ngayCapBang: gcn_nh.ngayCapBang,
-            ghiChu: gcn_nh.ghiChu,
-            dsNhomSPDV: gcn_nh.dsNhomSPDV,
-            hanGiaHan: gcn_nh.hanGiaHan,
-            ngayHetHanBang: gcn_nh.ngayHetHanBang
+        const { donMapByMaDon, donMapBySoDon } = await resolveMaHoSoForGCNList(GCN_NHs, false);
 
-
-        }));
+        const result = GCN_NHs.map(gcn_nh => {
+            let actualMaHoSo = gcn_nh.maHoSo;
+            if (!actualMaHoSo || actualMaHoSo === gcn_nh.soBang) {
+                actualMaHoSo = (gcn_nh.maDonDangKy && donMapByMaDon.get(gcn_nh.maDonDangKy))
+                    || (gcn_nh.soDon && donMapBySoDon.get(gcn_nh.soDon))
+                    || gcn_nh.maHoSo
+                    || "";
+            }
+            return {
+                id: gcn_nh.id,
+                soBang: gcn_nh.soBang,
+                soDon: gcn_nh.soDon,
+                maHoSo: actualMaHoSo,
+                tenKhachHang: gcn_nh.KhachHangCuoi?.tenKhachHang || "",
+                tenDoiTac: gcn_nh.DoiTac?.tenDoiTac || "",
+                tenNhanHieu: gcn_nh.NhanHieu?.tenNhanHieu || "",
+                linkAnh: gcn_nh.NhanHieu?.linkAnh || "",
+                anhBang: gcn_nh.anhBang || null,
+                linkScan: gcn_nh.anhBang || null,
+                clientRef: gcn_nh.clientsRef || gcn_nh.clientRef || "",
+                ngayNopDon: gcn_nh.ngayNopDon,
+                ngayCapBang: gcn_nh.ngayCapBang,
+                ghiChu: gcn_nh.ghiChu,
+                dsNhomSPDV: gcn_nh.dsNhomSPDV,
+                hanGiaHan: gcn_nh.hanGiaHan,
+                ngayHetHanBang: gcn_nh.ngayHetHanBang
+            };
+        });
 
         res.status(200).json({
             data: result,
@@ -99,63 +186,93 @@ export const getGCN_NHs = async (req, res) => {
 
 export const getGCN_NHs_SD = async (req, res) => {
     try {
-        const { soBang, pageIndex = 1, pageSize = 20 } = req.body;
+        const { soBang, pageIndex = 1, pageSize = 20, customerName, partnerName, brandName } = req.body;
         const offset = (pageIndex - 1) * pageSize;
 
         const whereCondition = { loaiBang: 2 };
-        if (soBang) whereCondition.soBang = { [Op.like]: `%${soBang}%` };
+        applySoBangSearch(whereCondition, soBang);
         whereCondition.bangGoc = { [Op.ne]: 1 };
 
         const totalItems = await GCN_NH.count({ where: whereCondition });
 
         const GCN_NHs = await GCN_NH.findAll({
             where: whereCondition,
-            attributes: ["id", "soBang", "soDon", "maHoSo", "ngayNopDon", "ngayCapBang", "ghiChu", "dsNhomSPDV", "hanGiaHan", "ngayHetHanBang"],
+            attributes: [
+                "id",
+                "soBang",
+                "soDon",
+                "maHoSo",
+                "maDonDangKy",
+                "ngayNopDon",
+                "ngayCapBang",
+                "ghiChu",
+                "dsNhomSPDV",
+                "hanGiaHan",
+                "ngayHetHanBang",
+                "anhBang",
+                "clientsRef"
+            ],
             include: [
                 {
                     model: NhanHieu,
                     as: "NhanHieu",
                     attributes: ["tenNhanHieu", "linkAnh"],
+                    required: !!brandName,
+                    where: buildTokensSearchCondition(brandName, "tenNhanHieu"),
                 },
                 {
                     model: KhachHangCuoi,
                     as: "KhachHangCuoi",
                     attributes: ["tenKhachHang"],
+                    required: !!customerName,
+                    where: buildTokensSearchCondition(customerName, "tenKhachHang"),
                 },
                 {
                     model: DoiTac,
                     as: "DoiTac",
                     attributes: ["tenDoiTac"],
+                    required: !!partnerName,
+                    where: buildTokensSearchCondition(partnerName, "tenDoiTac"),
                 },
             ],
             limit: pageSize,
             offset: offset,
         });
 
-
         if (!GCN_NHs.length) {
             return res.status(404).json({ message: "Không có bằng nào phù hợp" });
         }
 
-        const result = GCN_NHs.map(gcn_nh => ({
-            id: gcn_nh.id,
-            soBang: gcn_nh.soBang,
-            soDon: gcn_nh.soDon,
-            maHoSo: gcn_nh.soBang,
-            tenKhachHang: gcn_nh.KhachHangCuoi?.tenKhachHang || "",
-            tenDoiTac: gcn_nh.DoiTac?.tenDoiTac || "",
-            tenNhanHieu: gcn_nh.NhanHieu?.tenNhanHieu || "",
-            linkAnh: gcn_nh.NhanHieu?.linkAnh || "",
-            clientRef: gcn_nh.clientRef,
-            ngayNopDon: gcn_nh.ngayNopDon,
-            ngayCapBang: gcn_nh.ngayCapBang,
-            ghiChu: gcn_nh.ghiChu,
-            dsNhomSPDV: gcn_nh.dsNhomSPDV,
-            hanGiaHan: gcn_nh.hanGiaHan,
-            ngayHetHanBang: gcn_nh.ngayHetHanBang
+        const { donMapByMaDon, donMapBySoDon } = await resolveMaHoSoForGCNList(GCN_NHs, false);
 
-
-        }));
+        const result = GCN_NHs.map(gcn_nh => {
+            let actualMaHoSo = gcn_nh.maHoSo;
+            if (!actualMaHoSo || actualMaHoSo === gcn_nh.soBang) {
+                actualMaHoSo = (gcn_nh.maDonDangKy && donMapByMaDon.get(gcn_nh.maDonDangKy))
+                    || (gcn_nh.soDon && donMapBySoDon.get(gcn_nh.soDon))
+                    || gcn_nh.maHoSo
+                    || "";
+            }
+            return {
+                id: gcn_nh.id,
+                soBang: gcn_nh.soBang,
+                soDon: gcn_nh.soDon,
+                maHoSo: actualMaHoSo,
+                tenKhachHang: gcn_nh.KhachHangCuoi?.tenKhachHang || "",
+                tenDoiTac: gcn_nh.DoiTac?.tenDoiTac || "",
+                tenNhanHieu: gcn_nh.NhanHieu?.tenNhanHieu || "",
+                linkAnh: gcn_nh.NhanHieu?.linkAnh || "",
+                anhBang: gcn_nh.anhBang || null,
+                linkScan: gcn_nh.anhBang || null,
+                clientRef: gcn_nh.clientsRef || gcn_nh.clientRef || "",
+                ngayNopDon: gcn_nh.ngayNopDon,
+                ngayCapBang: gcn_nh.ngayCapBang,
+                ghiChu: gcn_nh.ghiChu,
+                dsNhomSPDV: gcn_nh.dsNhomSPDV,
+                hanGiaHan: gcn_nh.hanGiaHan,
+                ngayHetHanBang: gcn_nh.ngayHetHanBang
+            };
+        });
 
         res.status(200).json({
             data: result,
@@ -179,39 +296,49 @@ export const getGCN_NHsCAM = async (req, res) => {
         const offset = (pageIndex - 1) * pageSize;
 
         const whereCondition = {}; // lọc theo quốc gia
-        if (soBang) whereCondition.soBang = { [Op.like]: `%${soBang}%` };
+        applySoBangSearch(whereCondition, soBang);
         whereCondition.bangGoc = { [Op.ne]: 1 };
         const totalItems = await GCN_NH_KH.count({ where: whereCondition });
 
         const GCN_NHs = await GCN_NH_KH.findAll({
             where: whereCondition,
-            attributes: ["id", "soBang", "soDon", "maHoSo", "ngayNopDon", "ngayCapBang", "ghiChu", "dsNhomSPDV", "hanNopTuyenThe", "hanGiaHan", "ngayHetHanBang"],
+            attributes: [
+                "id",
+                "soBang",
+                "soDon",
+                "maHoSo",
+                "maDonDangKy",
+                "ngayNopDon",
+                "ngayCapBang",
+                "ghiChu",
+                "dsNhomSPDV",
+                "hanNopTuyenThe",
+                "hanGiaHan",
+                "ngayHetHanBang",
+                "anhBang",
+                "clientsRef"
+            ],
             include: [
                 {
                     model: NhanHieu,
                     as: "NhanHieu",
                     attributes: ["tenNhanHieu", "linkAnh"],
-                    required: !!customerName,
-                    where: customerName
-                        ? { tenKhachHang: { [Op.like]: `%${customerName}%` } }
-                        : undefined,
+                    required: !!brandName,
+                    where: buildTokensSearchCondition(brandName, "tenNhanHieu"),
                 },
                 {
                     model: KhachHangCuoi,
                     as: "KhachHangCuoi",
                     attributes: ["tenKhachHang"],
-                    where: customerName
-                        ? { tenKhachHang: { [Op.like]: `%${customerName}%` } }
-                        : undefined,
+                    required: !!customerName,
+                    where: buildTokensSearchCondition(customerName, "tenKhachHang"),
                 },
                 {
                     model: DoiTac,
                     as: "DoiTac",
                     attributes: ["tenDoiTac"],
                     required: !!partnerName,
-                    where: partnerName
-                        ? { tenDoiTac: { [Op.like]: `%${partnerName}%` } }
-                        : undefined
+                    where: buildTokensSearchCondition(partnerName, "tenDoiTac"),
                 },
             ],
             limit: pageSize,
@@ -222,24 +349,37 @@ export const getGCN_NHsCAM = async (req, res) => {
             return res.status(404).json({ message: "Không có bằng nào phù hợp (Campuchia)" });
         }
 
-        const result = GCN_NHs.map(gcn_nh => ({
-            id: gcn_nh.id,
-            soBang: gcn_nh.soBang,
-            soDon: gcn_nh.soDon,
-            maHoSo: gcn_nh.maHoSo,
-            tenKhachHang: gcn_nh.KhachHangCuoi?.tenKhachHang || "",
-            tenDoiTac: gcn_nh.DoiTac?.tenDoiTac || "",
-            tenNhanHieu: gcn_nh.NhanHieu?.tenNhanHieu || "",
-            linkAnh: gcn_nh.NhanHieu?.linkAnh || "",
-            clientRef: gcn_nh.clientRef,
-            ngayNopDon: gcn_nh.ngayNopDon,
-            ngayCapBang: gcn_nh.ngayCapBang,
-            ghiChu: gcn_nh.ghiChu,
-            dsNhomSPDV: gcn_nh.dsNhomSPDV,
-            hanNopTuyenThe: gcn_nh.hanNopTuyenThe,
-            hanGiaHan: gcn_nh.hanGiaHan,
-            ngayHetHanBang: gcn_nh.ngayHetHanBang
-        }));
+        const { donMapByMaDon, donMapBySoDon } = await resolveMaHoSoForGCNList(GCN_NHs, true);
+
+        const result = GCN_NHs.map(gcn_nh => {
+            let actualMaHoSo = gcn_nh.maHoSo;
+            if (!actualMaHoSo || actualMaHoSo === gcn_nh.soBang) {
+                actualMaHoSo = (gcn_nh.maDonDangKy && donMapByMaDon.get(gcn_nh.maDonDangKy))
+                    || (gcn_nh.soDon && donMapBySoDon.get(gcn_nh.soDon))
+                    || gcn_nh.maHoSo
+                    || "";
+            }
+            return {
+                id: gcn_nh.id,
+                soBang: gcn_nh.soBang,
+                soDon: gcn_nh.soDon,
+                maHoSo: actualMaHoSo,
+                tenKhachHang: gcn_nh.KhachHangCuoi?.tenKhachHang || "",
+                tenDoiTac: gcn_nh.DoiTac?.tenDoiTac || "",
+                tenNhanHieu: gcn_nh.NhanHieu?.tenNhanHieu || "",
+                linkAnh: gcn_nh.NhanHieu?.linkAnh || "",
+                anhBang: gcn_nh.anhBang || null,
+                linkScan: gcn_nh.anhBang || null,
+                clientRef: gcn_nh.clientsRef || gcn_nh.clientRef || "",
+                ngayNopDon: gcn_nh.ngayNopDon,
+                ngayCapBang: gcn_nh.ngayCapBang,
+                ghiChu: gcn_nh.ghiChu,
+                dsNhomSPDV: gcn_nh.dsNhomSPDV,
+                hanNopTuyenThe: gcn_nh.hanNopTuyenThe,
+                hanGiaHan: gcn_nh.hanGiaHan,
+                ngayHetHanBang: gcn_nh.ngayHetHanBang
+            };
+        });
 
         res.status(200).json({
             data: result,
@@ -257,32 +397,53 @@ export const getGCN_NHsCAM = async (req, res) => {
 
 export const getGCN_NHsCAM_SD = async (req, res) => {
     try {
-        const { soBang, pageIndex = 1, pageSize = 20 } = req.body;
+        const { soBang, pageIndex = 1, pageSize = 20, customerName, partnerName, brandName } = req.body;
         const offset = (pageIndex - 1) * pageSize;
 
         const whereCondition = { loaiBang: 2 }; // lọc theo quốc gia
-        if (soBang) whereCondition.soBang = { [Op.like]: `%${soBang}%` };
+        applySoBangSearch(whereCondition, soBang);
         whereCondition.bangGoc = { [Op.ne]: 1 };
         const totalItems = await GCN_NH_KH.count({ where: whereCondition });
 
         const GCN_NHs = await GCN_NH_KH.findAll({
             where: whereCondition,
-            attributes: ["id", "soBang", "soDon", "maHoSo", "ngayNopDon", "ngayCapBang", "ghiChu", "dsNhomSPDV", "hanNopTuyenThe", "hanGiaHan", "ngayHetHanBang"],
+            attributes: [
+                "id",
+                "soBang",
+                "soDon",
+                "maHoSo",
+                "maDonDangKy",
+                "ngayNopDon",
+                "ngayCapBang",
+                "ghiChu",
+                "dsNhomSPDV",
+                "hanNopTuyenThe",
+                "hanGiaHan",
+                "ngayHetHanBang",
+                "anhBang",
+                "clientsRef"
+            ],
             include: [
                 {
                     model: NhanHieu,
                     as: "NhanHieu",
                     attributes: ["tenNhanHieu", "linkAnh"],
+                    required: !!brandName,
+                    where: buildTokensSearchCondition(brandName, "tenNhanHieu"),
                 },
                 {
                     model: KhachHangCuoi,
                     as: "KhachHangCuoi",
                     attributes: ["tenKhachHang"],
+                    required: !!customerName,
+                    where: buildTokensSearchCondition(customerName, "tenKhachHang"),
                 },
                 {
                     model: DoiTac,
                     as: "DoiTac",
                     attributes: ["tenDoiTac"],
+                    required: !!partnerName,
+                    where: buildTokensSearchCondition(partnerName, "tenDoiTac"),
                 },
             ],
             limit: pageSize,
@@ -293,24 +454,37 @@ export const getGCN_NHsCAM_SD = async (req, res) => {
             return res.status(404).json({ message: "Không có bằng nào phù hợp (Campuchia)" });
         }
 
-        const result = GCN_NHs.map(gcn_nh => ({
-            id: gcn_nh.id,
-            soBang: gcn_nh.soBang,
-            soDon: gcn_nh.soDon,
-            maHoSo: gcn_nh.maHoSo,
-            tenKhachHang: gcn_nh.KhachHangCuoi?.tenKhachHang || "",
-            tenDoiTac: gcn_nh.DoiTac?.tenDoiTac || "",
-            tenNhanHieu: gcn_nh.NhanHieu?.tenNhanHieu || "",
-            linkAnh: gcn_nh.NhanHieu?.linkAnh || "",
-            clientRef: gcn_nh.clientRef,
-            ngayNopDon: gcn_nh.ngayNopDon,
-            ngayCapBang: gcn_nh.ngayCapBang,
-            ghiChu: gcn_nh.ghiChu,
-            dsNhomSPDV: gcn_nh.dsNhomSPDV,
-            hanNopTuyenThe: gcn_nh.hanNopTuyenThe,
-            hanGiaHan: gcn_nh.hanGiaHan,
-            ngayHetHanBang: gcn_nh.ngayHetHanBang
-        }));
+        const { donMapByMaDon, donMapBySoDon } = await resolveMaHoSoForGCNList(GCN_NHs, true);
+
+        const result = GCN_NHs.map(gcn_nh => {
+            let actualMaHoSo = gcn_nh.maHoSo;
+            if (!actualMaHoSo || actualMaHoSo === gcn_nh.soBang) {
+                actualMaHoSo = (gcn_nh.maDonDangKy && donMapByMaDon.get(gcn_nh.maDonDangKy))
+                    || (gcn_nh.soDon && donMapBySoDon.get(gcn_nh.soDon))
+                    || gcn_nh.maHoSo
+                    || "";
+            }
+            return {
+                id: gcn_nh.id,
+                soBang: gcn_nh.soBang,
+                soDon: gcn_nh.soDon,
+                maHoSo: actualMaHoSo,
+                tenKhachHang: gcn_nh.KhachHangCuoi?.tenKhachHang || "",
+                tenDoiTac: gcn_nh.DoiTac?.tenDoiTac || "",
+                tenNhanHieu: gcn_nh.NhanHieu?.tenNhanHieu || "",
+                linkAnh: gcn_nh.NhanHieu?.linkAnh || "",
+                anhBang: gcn_nh.anhBang || null,
+                linkScan: gcn_nh.anhBang || null,
+                clientRef: gcn_nh.clientsRef || gcn_nh.clientRef || "",
+                ngayNopDon: gcn_nh.ngayNopDon,
+                ngayCapBang: gcn_nh.ngayCapBang,
+                ghiChu: gcn_nh.ghiChu,
+                dsNhomSPDV: gcn_nh.dsNhomSPDV,
+                hanNopTuyenThe: gcn_nh.hanNopTuyenThe,
+                hanGiaHan: gcn_nh.hanGiaHan,
+                ngayHetHanBang: gcn_nh.ngayHetHanBang
+            };
+        });
 
         res.status(200).json({
             data: result,
@@ -337,6 +511,7 @@ export const getGCN_NHDetail = async (req, res) => {
                 "soBang",
                 "soDon",
                 "maHoSo",
+                "maDonDangKy",
                 "ngayNopDon",
                 "ngayCapBang",
                 "ghiChu",
@@ -348,11 +523,10 @@ export const getGCN_NHDetail = async (req, res) => {
                 "idKhachHang",
                 "idDoiTac",
                 "maQuocGia",
-                "mauSacNH",
-                "ghiChu",
                 "quyetDinhSo",
                 "maNhanHieu",
                 "ngayHetHanBang",
+                "clientsRef",
             ],
             include: [
                 {
@@ -377,9 +551,41 @@ export const getGCN_NHDetail = async (req, res) => {
             return res.status(404).json({ message: "Không tìm thấy bằng này" });
         }
 
-        // ✅ Lấy danh sách vụ việc theo maHoSo
-        const vuViecs = await VuViec.findAll({
-            where: { maHoSo: gcn_nh.maHoSo },
+        let actualMaHoSo = gcn_nh.maHoSo;
+        if (!actualMaHoSo || actualMaHoSo === gcn_nh.soBang) {
+            let don = null;
+            if (gcn_nh.maDonDangKy) {
+                don = await DonDangKy.findOne({
+                    where: { maDonDangKy: gcn_nh.maDonDangKy },
+                    attributes: ["maHoSo", "maHoSoVuViec"],
+                });
+            }
+            if (!don && gcn_nh.soDon) {
+                don = await DonDangKy.findOne({
+                    where: { soDon: gcn_nh.soDon },
+                    attributes: ["maHoSo", "maHoSoVuViec"],
+                });
+            }
+            if (don && (don.maHoSo || don.maHoSoVuViec)) {
+                actualMaHoSo = don.maHoSo || don.maHoSoVuViec;
+                gcn_nh.update({ maHoSo: actualMaHoSo }).catch(console.error);
+            }
+        }
+
+        // ✅ Lấy danh sách vụ việc theo maHoSo hoặc liên kết maDon / soDon
+        const vuViecWhere = [];
+        if (actualMaHoSo) {
+            vuViecWhere.push({ maHoSo: actualMaHoSo });
+        }
+        if (gcn_nh.id) {
+            vuViecWhere.push({ maDon: gcn_nh.id, tenBang: "GCN_NH_VN" });
+        }
+        if (gcn_nh.soDon) {
+            vuViecWhere.push({ soDon: gcn_nh.soDon });
+        }
+
+        const vuViecs = vuViecWhere.length > 0 ? await VuViec.findAll({
+            where: { [Op.or]: vuViecWhere },
             attributes: [
                 "id",
                 "maHoSo",
@@ -399,27 +605,31 @@ export const getGCN_NHDetail = async (req, res) => {
                 "ghiChuTuChoi",
             ],
             order: [["createdAt", "DESC"]],
-        });
+        }) : [];
+
+        const uniqueVuViecs = Array.from(new Map(vuViecs.map(v => [v.id, v.toJSON()])).values());
 
         // ✅ Kết quả trả về gộp cả vụ việc
         const result = {
             id: gcn_nh.id,
             soBang: gcn_nh.soBang,
             soDon: gcn_nh.soDon,
-            maHoSo: gcn_nh.maHoSo,
+            maHoSo: actualMaHoSo || gcn_nh.maHoSo || "",
+            maDonDangKy: gcn_nh.maDonDangKy,
             tenKhachHang: gcn_nh.KhachHangCuoi?.tenKhachHang || "",
             diaChiKhachHang: gcn_nh.KhachHangCuoi?.diaChi || "",
             tenDoiTac: gcn_nh.DoiTac?.tenDoiTac || "",
             tenNhanHieu: gcn_nh.NhanHieu?.tenNhanHieu || "",
             linkAnh: gcn_nh.NhanHieu?.linkAnh || null,
-            clientRef: gcn_nh.clientRef,
+            clientRef: gcn_nh.clientsRef || gcn_nh.clientRef || "",
             ngayNopDon: gcn_nh.ngayNopDon,
             ngayCapBang: gcn_nh.ngayCapBang,
             ghiChu: gcn_nh.ghiChu,
             dsNhomSPDV: gcn_nh.dsNhomSPDV,
             chiTietNhomSPDV: gcn_nh.chiTietNhomSPDV,
             mauSacNH: gcn_nh.mauSacNH,
-            anhBang: gcn_nh.anhBang,
+            anhBang: gcn_nh.anhBang || null,
+            linkScan: gcn_nh.anhBang || null,
             hanGiaHan: gcn_nh.hanGiaHan,
             idKhachHang: gcn_nh.idKhachHang,
             idDoiTac: gcn_nh.idDoiTac,
@@ -427,7 +637,7 @@ export const getGCN_NHDetail = async (req, res) => {
             maQuocGia: gcn_nh.maQuocGia,
             quyetDinhSo: gcn_nh.quyetDinhSo,
             ngayHetHanBang: gcn_nh.ngayHetHanBang,
-            vuViecs: vuViecs.map(v => v.toJSON()),
+            vuViecs: uniqueVuViecs,
         };
 
         res.status(200).json(result);
@@ -436,7 +646,6 @@ export const getGCN_NHDetail = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
-
 
 export const getGCN_NH_CAMDetail = async (req, res) => {
     try {
@@ -449,6 +658,7 @@ export const getGCN_NH_CAMDetail = async (req, res) => {
                 "soBang",
                 "soDon",
                 "maHoSo",
+                "maDonDangKy",
                 "ngayNopDon",
                 "ngayCapBang",
                 "ghiChu",
@@ -461,11 +671,10 @@ export const getGCN_NH_CAMDetail = async (req, res) => {
                 "idKhachHang",
                 "idDoiTac",
                 "maQuocGia",
-                "mauSacNH",
-                "ghiChu",
                 "quyetDinhSo",
                 "maNhanHieu",
                 "ngayHetHanBang",
+                "clientsRef",
             ],
             include: [
                 {
@@ -489,8 +698,41 @@ export const getGCN_NH_CAMDetail = async (req, res) => {
         if (!gcn_nh) {
             return res.status(404).json({ message: "Không tìm thấy bằng này" });
         }
-        const vuViecs = await VuViec.findAll({
-            where: { maHoSo: gcn_nh.maHoSo },
+
+        let actualMaHoSo = gcn_nh.maHoSo;
+        if (!actualMaHoSo || actualMaHoSo === gcn_nh.soBang) {
+            let don = null;
+            if (gcn_nh.maDonDangKy) {
+                don = await DonDangKyNhanHieu_KH.findOne({
+                    where: { maDonDangKy: gcn_nh.maDonDangKy },
+                    attributes: ["maHoSo", "maHoSoVuViec"],
+                });
+            }
+            if (!don && gcn_nh.soDon) {
+                don = await DonDangKyNhanHieu_KH.findOne({
+                    where: { soDon: gcn_nh.soDon },
+                    attributes: ["maHoSo", "maHoSoVuViec"],
+                });
+            }
+            if (don && (don.maHoSo || don.maHoSoVuViec)) {
+                actualMaHoSo = don.maHoSo || don.maHoSoVuViec;
+                gcn_nh.update({ maHoSo: actualMaHoSo }).catch(console.error);
+            }
+        }
+
+        const vuViecWhere = [];
+        if (actualMaHoSo) {
+            vuViecWhere.push({ maHoSo: actualMaHoSo });
+        }
+        if (gcn_nh.id) {
+            vuViecWhere.push({ maDon: gcn_nh.id, tenBang: "GCN_NH_KH" });
+        }
+        if (gcn_nh.soDon) {
+            vuViecWhere.push({ soDon: gcn_nh.soDon });
+        }
+
+        const vuViecs = vuViecWhere.length > 0 ? await VuViec.findAll({
+            where: { [Op.or]: vuViecWhere },
             attributes: [
                 "id",
                 "maHoSo",
@@ -510,27 +752,31 @@ export const getGCN_NH_CAMDetail = async (req, res) => {
                 "ghiChuTuChoi",
             ],
             order: [["createdAt", "DESC"]],
-        });
+        }) : [];
+
+        const uniqueVuViecs = Array.from(new Map(vuViecs.map(v => [v.id, v.toJSON()])).values());
 
         // ✅ Kết quả trả về gộp cả vụ việc
         const result = {
             id: gcn_nh.id,
             soBang: gcn_nh.soBang,
             soDon: gcn_nh.soDon,
-            maHoSo: gcn_nh.maHoSo,
+            maHoSo: actualMaHoSo || gcn_nh.maHoSo || "",
+            maDonDangKy: gcn_nh.maDonDangKy,
             tenKhachHang: gcn_nh.KhachHangCuoi?.tenKhachHang || "",
             diaChiKhachHang: gcn_nh.KhachHangCuoi?.diaChi || "",
             tenDoiTac: gcn_nh.DoiTac?.tenDoiTac || "",
             tenNhanHieu: gcn_nh.NhanHieu?.tenNhanHieu || "",
             linkAnh: gcn_nh.NhanHieu?.linkAnh || null,
-            clientRef: gcn_nh.clientRef,
+            clientRef: gcn_nh.clientsRef || gcn_nh.clientRef || "",
             ngayNopDon: gcn_nh.ngayNopDon,
             ngayCapBang: gcn_nh.ngayCapBang,
             ghiChu: gcn_nh.ghiChu,
             dsNhomSPDV: gcn_nh.dsNhomSPDV,
             chiTietNhomSPDV: gcn_nh.chiTietNhomSPDV,
             mauSacNH: gcn_nh.mauSacNH,
-            anhBang: gcn_nh.anhBang,
+            anhBang: gcn_nh.anhBang || null,
+            linkScan: gcn_nh.anhBang || null,
             hanGiaHan: gcn_nh.hanGiaHan,
             hanNopTuyenThe: gcn_nh.hanNopTuyenThe,
             idKhachHang: gcn_nh.idKhachHang,
@@ -539,8 +785,7 @@ export const getGCN_NH_CAMDetail = async (req, res) => {
             maQuocGia: gcn_nh.maQuocGia,
             quyetDinhSo: gcn_nh.quyetDinhSo,
             ngayHetHanBang: gcn_nh.ngayHetHanBang,
-            // 🧩 thêm danh sách vụ việc
-            vuViecs: vuViecs.map(v => v.toJSON()),
+            vuViecs: uniqueVuViecs,
         };
 
         res.status(200).json(result);
@@ -1252,5 +1497,86 @@ export const editGCN_NH_VN = async (req, res) => {
         await t.rollback();
         console.error("❌ Lỗi khi chỉnh sửa GCN_NH_VN:", error);
         res.status(500).json({ message: "Lỗi server", error: error.message });
+    }
+};
+
+export const getGCNOptions = async (req, res) => {
+    try {
+        const { searchText = "", limit = 20 } = req.body;
+        const maxLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+        const search = String(searchText).trim();
+        const tokens = search ? search.split(/\s+/).filter(Boolean) : [];
+
+        const queryGCNModel = async (Model) => {
+            const where = { bangGoc: { [Op.ne]: 1 } };
+            if (tokens.length > 0) {
+                where[Op.and] = tokens.map(tok => {
+                    const normTok = tok.replace(/-/g, "");
+                    return {
+                        [Op.or]: [
+                            { soBang: { [Op.like]: `%${tok}%` } },
+                            Sequelize.literal(`REPLACE(soBang, '-', '') LIKE '%${normTok}%'`),
+                            { soDon: { [Op.like]: `%${tok}%` } },
+                            Sequelize.literal(`REPLACE(soDon, '-', '') LIKE '%${normTok}%'`),
+                            { maHoSo: { [Op.like]: `%${tok}%` } },
+                            Sequelize.literal(`REPLACE(maHoSo, '-', '') LIKE '%${normTok}%'`),
+                            Sequelize.literal(`\`NhanHieu\`.\`tenNhanHieu\` LIKE '%${tok}%'`),
+                        ]
+                    };
+                });
+            }
+
+            return await Model.findAll({
+                where,
+                attributes: ["soBang", "maHoSo", "soDon"],
+                include: [
+                    {
+                        model: NhanHieu,
+                        as: "NhanHieu",
+                        attributes: ["tenNhanHieu"],
+                        required: false,
+                    }
+                ],
+                limit: maxLimit * 2,
+                order: [["updatedAt", "DESC"]],
+                raw: false,
+            }).catch(err => {
+                console.error("Lỗi getGCNOptions query:", err?.message);
+                return [];
+            });
+        };
+
+        const [vnGCNs, khGCNs] = await Promise.all([
+            queryGCNModel(GCN_NH),
+            queryGCNModel(GCN_NH_KH),
+        ]);
+
+        const combined = [...vnGCNs, ...khGCNs];
+        const seen = new Set();
+        const data = [];
+
+        for (const item of combined) {
+            const soBang = item.soBang || "";
+            const maHoSoVuViec = item.maHoSo || item.soDon || "";
+            const tenNhanHieu = item.NhanHieu?.tenNhanHieu || "";
+
+            const key = `${soBang}__${maHoSoVuViec}__${tenNhanHieu}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                data.push({
+                    soBang,
+                    maHoSoVuViec,
+                    tenNhanHieu,
+                });
+            }
+            if (data.length >= maxLimit) break;
+        }
+
+        return res.status(200).json({
+            success: true,
+            data,
+        });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
     }
 };

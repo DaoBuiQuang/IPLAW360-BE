@@ -5,7 +5,9 @@ import {
     deleteNhanSu,
     getNhanSuList,
     getNhanSuById,
-    getNhanSuBasicList
+    getNhanSuBasicList,
+    getMyTeam,
+    updateStaffRole,
 } from "../controllers/nhanSuController.js";
 import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.js";
 
@@ -123,7 +125,7 @@ router.put("/staff/edit",authenticateUser,authorizeRoles("admin"), updateNhanSu)
  *       401:
  *         description: Không có quyền truy cập
  */
-router.post("/staff/list",authenticateUser,authorizeRoles("admin"), getNhanSuList);
+router.post("/staff/list",authenticateUser,authorizeRoles("admin", "manager"), getNhanSuList);
 
 /**
  * @swagger
@@ -153,7 +155,7 @@ router.post("/staff/list",authenticateUser,authorizeRoles("admin"), getNhanSuLis
  *       404:
  *         description: Không tìm thấy nhân sự
  */
-router.post("/staff/detail",authenticateUser,authorizeRoles("admin", 'staff', 'trainee'), getNhanSuById);
+router.post("/staff/detail",authenticateUser,authorizeRoles("admin", "manager", "staff", "trainee"), getNhanSuById);
 
 /**
  * @swagger
@@ -208,5 +210,65 @@ router.post("/staff/delete",authenticateUser,authorizeRoles("admin"), deleteNhan
  *       401:
  *         description: Không có quyền truy cập
  */
-router.post("/staff/basiclist",authenticateUser,authorizeRoles("admin", "staff"), getNhanSuBasicList)
+router.post("/staff/basiclist",authenticateUser,authorizeRoles("admin", "manager", "staff"), getNhanSuBasicList)
+
+/**
+ * @swagger
+ * /staff/myteam:
+ *   post:
+ *     summary: Lấy danh sách nhân viên trong team của Manager
+ *     tags: [Staff]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Lấy danh sách thành công
+ *       401:
+ *         description: Không có quyền truy cập
+ *       403:
+ *         description: Chỉ Manager mới có thể xem team
+ */
+router.post("/staff/myteam", authenticateUser, authorizeRoles("manager", "admin"), getMyTeam);
+router.get("/staff/myteam", authenticateUser, authorizeRoles("manager", "admin"), getMyTeam);
+
+/**
+ * @swagger
+ * /staff/update-role:
+ *   post:
+ *     summary: Thăng cấp / cập nhật vai trò cho nhân sự (Chỉ Admin)
+ *     tags: [Staff]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - maNhanSu
+ *               - role
+ *             properties:
+ *               maNhanSu:
+ *                 type: string
+ *                 example: "NS001"
+ *               role:
+ *                 type: string
+ *                 enum: [manager, staff, admin, trainee]
+ *                 example: "manager"
+ *     responses:
+ *       200:
+ *         description: Cập nhật vai trò thành công
+ *       400:
+ *         description: Thiếu dữ liệu hoặc vai trò không hợp lệ
+ *       401:
+ *         description: Không có quyền truy cập
+ *       403:
+ *         description: Chỉ Admin mới có quyền thực hiện
+ *       404:
+ *         description: Không tìm thấy nhân sự hoặc tài khoản
+ */
+router.post("/staff/update-role", authenticateUser, authorizeRoles("admin"), updateStaffRole);
+
 export default router;
+

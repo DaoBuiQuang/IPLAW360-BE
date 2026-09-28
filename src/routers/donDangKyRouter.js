@@ -1,7 +1,33 @@
 import express from "express";
-import { createApplication, deleteApplication, getAllApplication, getApplicationById, getApplicationsByGUQ, getApplicationsByMaKhachHang, getFullApplicationDetail, getMaKhachHangByMaHoSoVuViec, exportApplicationsToExcel, updateApplication } from "../controllers/donDangKyController.js";
+import { createApplication, deleteApplication, getAllApplication, getApplicationById, getApplicationsByGUQ, getApplicationsByMaKhachHang, getFullApplicationDetail, getMaKhachHangByMaHoSoVuViec, exportApplicationsToExcel, updateApplication, getApplicationOptions } from "../controllers/donDangKyController.js";
 import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.js";
 const router = express.Router();
+
+/**
+ * @swagger
+ * /application/options:
+ *   post:
+ *     summary: Gợi ý tìm kiếm nhanh đơn đăng ký (Số đơn / Mã hồ sơ / Nhãn hiệu)
+ *     tags: [Application]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               searchText:
+ *                 type: string
+ *               limit:
+ *                 type: integer
+ *                 default: 20
+ *     responses:
+ *       200:
+ *         description: Gợi ý thành công
+ */
+router.post("/application/options", authenticateUser, getApplicationOptions);
 
 /**
  * @swagger
