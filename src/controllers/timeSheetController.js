@@ -3,6 +3,7 @@ import { sequelize } from "../config/db.js";
 import { TimeSheet } from "../models/timeSheetModel.js";
 import { NhanSu } from "../models/nhanSuModel.js";
 import { NhomNhanSu } from "../models/nhomNhanSuModel.js";
+import { Auth } from "../models/authModel.js";
 import { DonDangKy } from "../models/donDangKyModel.js";
 import { DonDangKyNhanHieu_KH } from "../models/KH/donDangKyNhanHieu_KHModel.js";
 import { GCN_NH } from "../models/GCN_NHModel.js";
@@ -888,7 +889,22 @@ export const getOfficeSummary = async (req, res) => {
         const { fromDate, toDate, workingDays } = getPeriodDateRange({ period, year, month, week, quarter });
         const targetHoursPerPerson = workingDays * 8;
 
-        // Lấy tất cả nhóm manager
+        // 1. Lấy tất cả nhân sự đang hoạt động kèm Role từ Auth
+        const allEmployees = await NhanSu.findAll({
+            attributes: ["maNhanSu", "hoTen", "chucVu", "phongBan"],
+            include: [
+                {
+                    model: Auth,
+                    as: "Auth",
+                    attributes: ["Role"],
+                    required: false,
+                },
+            ],
+            raw: true,
+            nest: true,
+        });
+
+        // 2. Lấy tất cả nhóm manager
         const allGroups = await NhomNhanSu.findAll({
             include: [
                 { model: NhanSu, as: "manager", attributes: ["maNhanSu", "hoTen"] },
@@ -896,7 +912,62 @@ export const getOfficeSummary = async (req, res) => {
             ],
         });
 
-        // Gom nhóm theo managerCode
+        const managerCodesSet = new Set(allGroups.map((g) => g.managerCode).filter(Boolean));
+
+        // 3. Lấy tất cả timesheet trong kỳ
+        const allRows = await TimeSheet.findAll({
+            where: { workDate: { [Op.between]: [fromDate, toDate] } },
+            attributes: ["employeeCode", "hours", "totalAmount"],
+            raw: true,
+        });
+
+        // Map timesheet theo employeeCode
+        const tsMap = {};
+        for (const row of allRows) {
+            const code = row.employeeCode;
+            if (!tsMap[code]) {
+                tsMap[code] = { totalHours: 0, totalAmount: 0, recordCount: 0 };
+            }
+            tsMap[code].totalHours += Number(row.hours || 0);
+            tsMap[code].totalAmount += Number(row.totalAmount || 0);
+            tsMap[code].recordCount += 1;
+        }
+
+        // 4. TỔNG TOÀN CÔNG TY (Tính trực tiếp từ allRows & allEmployees)
+        const companyTotalHours = allRows.reduce((s, r) => s + Number(r.hours || 0), 0);
+        const companyTotalAmount = allRows.reduce((s, r) => s + Number(r.totalAmount || 0), 0);
+        const companyRecordCount = allRows.length;
+        const companyTargetHours = allEmployees.length * targetHoursPerPerson;
+        const companyCompletionRate = companyTargetHours > 0
+            ? Math.round((companyTotalHours / companyTargetHours) * 10000) / 100
+            : 0;
+
+        // 5. Build danh sách allStaff
+        const allStaff = allEmployees.map((emp) => {
+            const data = tsMap[emp.maNhanSu] || { totalHours: 0, totalAmount: 0, recordCount: 0 };
+            const authRole = emp.Auth?.Role || emp["Auth.Role"] || emp.Role || null;
+            const isManager = managerCodesSet.has(emp.maNhanSu) || String(authRole || "").toLowerCase() === "manager";
+            const role = authRole || (isManager ? "manager" : "staff");
+
+            return {
+                employeeCode: emp.maNhanSu,
+                hoTen: emp.hoTen,
+                chucVu: emp.chucVu,
+                phongBan: emp.phongBan,
+                Role: role,
+                role: role,
+                isManager,
+                totalHours: Math.round(data.totalHours * 100) / 100,
+                targetHours: targetHoursPerPerson,
+                completionRate: targetHoursPerPerson > 0
+                    ? Math.round((data.totalHours / targetHoursPerPerson) * 10000) / 100
+                    : 0,
+                totalAmount: Math.round(data.totalAmount * 100) / 100,
+                recordCount: data.recordCount,
+            };
+        }).sort((a, b) => b.totalHours - a.totalHours);
+
+        // 6. Gom nhóm theo team (nếu có)
         const teamMap = {};
         for (const rec of allGroups) {
             const mgCode = rec.managerCode;
@@ -915,33 +986,11 @@ export const getOfficeSummary = async (req, res) => {
             }
         }
 
-        // Lấy tất cả timesheet trong kỳ
-        const allRows = await TimeSheet.findAll({
-            where: { workDate: { [Op.between]: [fromDate, toDate] } },
-            attributes: ["employeeCode", "hours", "totalAmount"],
-            raw: true,
-        });
-
-        // Map employeeCode → data
-        const tsMap = {};
-        for (const row of allRows) {
-            if (!tsMap[row.employeeCode]) tsMap[row.employeeCode] = { totalHours: 0, totalAmount: 0 };
-            tsMap[row.employeeCode].totalHours += Number(row.hours);
-            tsMap[row.employeeCode].totalAmount += Number(row.totalAmount);
-        }
-
-        // Tổng toàn công ty
-        let companyTotalHours = 0;
-        let companyTotalAmount = 0;
-
-        // Build teams
         const teams = Object.values(teamMap).map((team) => {
-            // Thành viên + manager
             const allMemberCodes = [team.managerCode, ...team.members.map((m) => m.maNhanSu)];
             const uniqueCodes = [...new Set(allMemberCodes)];
-
             const memberDetails = uniqueCodes.map((code) => {
-                const data = tsMap[code] || { totalHours: 0, totalAmount: 0 };
+                const data = tsMap[code] || { totalHours: 0, totalAmount: 0, recordCount: 0 };
                 return {
                     employeeCode: code,
                     hoTen: team.members.find((m) => m.maNhanSu === code)?.hoTen
@@ -951,6 +1000,7 @@ export const getOfficeSummary = async (req, res) => {
                         ? Math.round((data.totalHours / targetHoursPerPerson) * 10000) / 100
                         : 0,
                     totalAmount: Math.round(data.totalAmount * 100) / 100,
+                    recordCount: data.recordCount,
                 };
             });
 
@@ -960,9 +1010,6 @@ export const getOfficeSummary = async (req, res) => {
             const teamCompletionRate = teamTargetHours > 0
                 ? Math.round((teamTotalHours / teamTargetHours) * 10000) / 100
                 : 0;
-
-            companyTotalHours += teamTotalHours;
-            companyTotalAmount += teamTotalAmount;
 
             return {
                 managerCode: team.managerCode,
@@ -975,13 +1022,6 @@ export const getOfficeSummary = async (req, res) => {
             };
         });
 
-        // Tổng nhân lực của toàn bộ team
-        const totalPersons = teams.reduce((s, t) => s + t.members.length, 0);
-        const companyTargetHours = totalPersons * targetHoursPerPerson;
-        const companyCompletionRate = companyTargetHours > 0
-            ? Math.round((companyTotalHours / companyTargetHours) * 10000) / 100
-            : 0;
-
         return res.status(200).json({
             success: true,
             officeSummary: {
@@ -993,7 +1033,10 @@ export const getOfficeSummary = async (req, res) => {
                 targetHours: companyTargetHours,
                 completionRate: companyCompletionRate,
                 totalAmount: Math.round(companyTotalAmount * 100) / 100,
+                recordCount: companyRecordCount,
+                hasTeams: teams.length > 0,
                 teams,
+                allStaff,
             },
         });
     } catch (error) {

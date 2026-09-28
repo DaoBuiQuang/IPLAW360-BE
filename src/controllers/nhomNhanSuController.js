@@ -463,3 +463,64 @@ export const setTeamMembers = async (req, res) => {
     }
 };
 
+
+// ============================================================
+// POST /team/delete  - Xóa cả team & tự trả manager về staff (chỉ Admin)
+
+// ============================================================
+// POST /team/delete  - Xóa cả team & tự trả manager về staff (chỉ Admin)
+// ============================================================
+export const deleteTeam = async (req, res) => {
+    try {
+        const callerRole = String(req.user?.role || "").toLowerCase();
+        if (callerRole !== "admin" && callerRole !== "ceo") {
+            return res.status(403).json({ message: "Chỉ Quản trị viên (Admin/CEO) mới có quyền xóa toàn bộ team" });
+        }
+
+        const { managerCode } = req.body;
+        if (!managerCode) {
+            return res.status(400).json({ message: "Cần cung cấp mã Trưởng nhóm (managerCode) để xóa team" });
+        }
+
+        const manager = await NhanSu.findByPk(managerCode);
+        const managerName = manager?.hoTen || managerCode;
+
+        // 1. Xóa toàn bộ bản ghi trong NhomNhanSu của managerCode này
+        const deletedCount = await NhomNhanSu.destroy({ where: { managerCode } });
+
+        // 2. Kiểm tra xem người này còn quản lý bất kỳ nhóm nào khác không
+        const otherTeamsCount = await NhomNhanSu.count({ where: { managerCode } });
+
+        let demotedToStaff = false;
+        let roleNote = "";
+
+        if (otherTeamsCount === 0) {
+            // Tìm tài khoản Auth của manager này
+            const managerAuth = await Auth.findOne({ where: { maNhanSu: managerCode } });
+            if (managerAuth) {
+                const currentRole = String(managerAuth.Role || "").toLowerCase();
+
+                // TUYỆT ĐỐI KHÔNG THAY ĐỔI ROLE NẾU LÀ ADMIN / CEO
+                if (currentRole === "admin" || currentRole === "ceo") {
+                    demotedToStaff = false;
+                    roleNote = " (Tài khoản thuộc Ban Giám đốc/Admin được giữ nguyên quyền)";
+                } else if (currentRole === "manager") {
+                    // Tự động chuyển role về lại staff
+                    managerAuth.Role = "staff";
+                    await managerAuth.save();
+                    demotedToStaff = true;
+                    roleNote = " và đã chuyển vai trò của Trưởng nhóm về lại Nhân viên";
+                }
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Đã xóa toàn bộ team của ${managerName} thành công${roleNote}.`,
+            deletedCount,
+            demotedToStaff,
+        });
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};

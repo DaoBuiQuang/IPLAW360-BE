@@ -6,6 +6,7 @@ import {
     removeTeamMember,
     bulkAddTeamMembers,
     setTeamMembers,
+    deleteTeam,
 } from "../controllers/nhomNhanSuController.js";
 import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.js";
 
@@ -217,5 +218,30 @@ router.post("/team/bulk-add", authenticateUser, authorizeRoles("admin", "manager
  *         description: Thiết lập nhóm thành công
  */
 router.post("/team/set-team", authenticateUser, authorizeRoles("admin", "manager"), setTeamMembers);
+
+/**
+ * @swagger
+ * /team/delete:
+ *   post:
+ *     summary: Xóa toàn bộ team của một Manager (Chỉ Admin)
+ *     tags: [Team]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - managerCode
+ *             properties:
+ *               managerCode:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Xóa team thành công
+ */
+router.post("/team/delete", authenticateUser, authorizeRoles("admin"), deleteTeam);
 
 export default router;
