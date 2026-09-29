@@ -2,6 +2,7 @@ import { DataTypes } from "sequelize";
 import { sequelize } from "../config/db.js";
 import { QuocGia } from "./quocGiaModel.js";
 import { addAuditHooks } from "./addAuditHooks.js";
+import { fixMojibake } from "../utils/fixEncoding.js";
 export const DoiTac = sequelize.define(
   "DoiTac",
   {
@@ -18,6 +19,13 @@ export const DoiTac = sequelize.define(
     tenDoiTac: {
       type: DataTypes.STRING,
       allowNull: false,
+      get() {
+        const rawValue = this.getDataValue("tenDoiTac");
+        return fixMojibake(rawValue);
+      },
+      set(val) {
+        this.setDataValue("tenDoiTac", fixMojibake(val));
+      },
     },
     maQuocGia: {
       type: DataTypes.STRING,

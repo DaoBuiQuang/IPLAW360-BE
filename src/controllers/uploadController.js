@@ -3,6 +3,7 @@ import xlsx from "xlsx";
 import { sequelize } from "../config/db.js";
 import fs from "fs";
 import path from "path";
+import { fixMojibake } from "../utils/fixEncoding.js";
 // Cấu hình multer để nhận file excel từ client
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
@@ -116,7 +117,7 @@ export const uploadExcel = [
       }
 
       // Đọc dữ liệu từ file Excel
-      const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
+      const workbook = xlsx.read(req.file.buffer, { type: "buffer", codepage: 65001 });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = xlsx.utils.sheet_to_json(sheet, {
         raw: false, // ép các ô date thành string
@@ -167,15 +168,15 @@ export const uploadExcel = [
               replacements: [
                 Error ?? null,
                 MaBanGhi ?? null,
-                instructingFirm ?? null,
+                fixMojibake(instructingFirm) ?? null,
                 maDoiTac ?? null,
-                clientName ?? null,
+                fixMojibake(clientName) ?? null,
                 nguoiXuLyChinh ?? null,
                 maKhachHang ?? null,
                 MatterCode ?? null,
                 noiDungVuViec ?? null,
                 nhomSPDV ?? null,
-                tenNhanHieu ?? null,
+                fixMojibake(tenNhanHieu) ?? null,
                 maQuocGiaVuViec ?? null,
                 soDon ?? null,
                  excelDateToMySQLDate(ngayNopDon),
@@ -219,7 +220,7 @@ export const uploadExcelDoiTac = [
   upload.single("excel"),
   async (req, res) => {
     try {
-      const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
+      const workbook = xlsx.read(req.file.buffer, { type: "buffer", codepage: 65001 });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = xlsx.utils.sheet_to_json(sheet);
 
@@ -250,7 +251,7 @@ export const uploadExcelDoiTac = [
             {
               replacements: [
                 maDoiTac ?? null,
-                tenDoiTac ?? null,
+                fixMojibake(tenDoiTac) ?? null,
                 maQuocGia ?? null,
               ],
             }
@@ -291,7 +292,7 @@ export const uploadExcelHoSoVuViec = [
   upload.single("excel"),
   async (req, res) => {
     try {
-      const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
+      const workbook = xlsx.read(req.file.buffer, { type: "buffer", codepage: 65001 });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rows = xlsx.utils.sheet_to_json(sheet, { raw: false });
 
@@ -370,7 +371,7 @@ export const uploadExcelHoSoVuViec = [
               INSERT INTO nhanhieu (tenNhanHieu, createdAt, updatedAt)
               VALUES (?, NOW(), NOW())
             `, {
-              replacements: [tenNhanHieu],
+              replacements: [fixMojibake(tenNhanHieu)],
               transaction,
               type: sequelize.QueryTypes.INSERT
             });
@@ -562,7 +563,7 @@ export const importHSVVFromDB = async (req, res) => {
             INSERT INTO nhanhieu (tenNhanHieu, isAutoImport, createdAt, updatedAt)
             VALUES (?, true, NOW(), NOW())
           `, {
-            replacements: [tenNhanHieu],
+            replacements: [fixMojibake(tenNhanHieu)],
             transaction,
             type: sequelize.QueryTypes.INSERT
           });
@@ -745,7 +746,7 @@ export const importHSVVCamFromDB = async (req, res) => {
             INSERT INTO nhanhieu (tenNhanHieu, isAutoImport, moTa, linkAnh, createdAt, updatedAt)
             VALUES (?, true, 'KH', 'KH', NOW(), NOW())
           `, {
-            replacements: [tenNhanHieu],
+            replacements: [fixMojibake(tenNhanHieu)],
             transaction,
             type: sequelize.QueryTypes.INSERT
           });
