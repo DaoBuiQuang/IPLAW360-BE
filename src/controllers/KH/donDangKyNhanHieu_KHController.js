@@ -82,6 +82,10 @@ export const getAllApplication_KH = async (req, res) => {
             pageSize = 20,
         } = req.body;
 
+        const effectiveCustomerName = customerName || req.body?.tenKhachHang || req.body?.maKhachHang;
+        const effectivePartnerName = partnerName || req.body?.tenDoiTac || req.body?.maDoiTac;
+        const effectiveBrandName = brandName || req.body?.tenNhanHieu || req.body?.maNhanHieu;
+
         if (!fields.includes("maDonDangKy")) fields.push("maDonDangKy");
         if (!fields.includes("donGoc")) fields.push("donGoc");
 
@@ -263,27 +267,37 @@ export const getAllApplication_KH = async (req, res) => {
                     model: NhanHieu,
                     as: "nhanHieu",
                     attributes: ["tenNhanHieu", "linkAnh"],
-                    required: !!brandName,
-                    where: brandName
-                        ? { tenNhanHieu: { [Op.like]: `%${brandName}%` } }
+                    required: !!effectiveBrandName,
+                    where: effectiveBrandName
+                        ? { tenNhanHieu: { [Op.like]: `%${effectiveBrandName}%` } }
                         : undefined,
                 },
                 {
                     model: KhachHangCuoi,
                     as: "khachHang",
-                    attributes: ["tenKhachHang"],
-                    required: !!customerName,
-                    where: customerName
-                        ? { tenKhachHang: { [Op.like]: `%${customerName}%` } }
+                    attributes: ["tenKhachHang", "maKhachHang"],
+                    required: !!effectiveCustomerName,
+                    where: effectiveCustomerName
+                        ? {
+                            [Op.or]: [
+                                { tenKhachHang: { [Op.like]: `%${effectiveCustomerName}%` } },
+                                { maKhachHang: { [Op.like]: `%${effectiveCustomerName}%` } },
+                            ]
+                        }
                         : undefined,
                 },
                 {
                     model: DoiTac,
                     as: "doitac",
-                    attributes: ["tenDoiTac"],
-                    required: !!partnerName,
-                    where: partnerName
-                        ? { tenDoiTac: { [Op.like]: `%${partnerName}%` } }
+                    attributes: ["tenDoiTac", "maDoiTac"],
+                    required: !!effectivePartnerName,
+                    where: effectivePartnerName
+                        ? {
+                            [Op.or]: [
+                                { tenDoiTac: { [Op.like]: `%${effectivePartnerName}%` } },
+                                { maDoiTac: { [Op.like]: `%${effectivePartnerName}%` } },
+                            ]
+                        }
                         : undefined,
                 },
             ],
