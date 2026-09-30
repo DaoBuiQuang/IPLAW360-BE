@@ -208,30 +208,61 @@ DonDangKyNhanHieu_KH.hasMany(TaiLieu_KH, { foreignKey: 'maDonDangKy', as: 'taiLi
 TaiLieu_KH.belongsTo(DonDangKyNhanHieu_KH, { foreignKey: 'maDonDangKy' });
 export const syncDatabase = async () => {
     try {
-        await sequelize.sync();
-        console.log("✅ Database synchronized with all models");
-        // Safe check and add contributionPercentage column to TimeSheets if not exists
+        // Safe check and add isSystem column to DanhSachCongViec BEFORE sync to avoid any sync errors
         try {
             await sequelize.query(`
-                ALTER TABLE TimeSheets ADD COLUMN contributionPercentage DECIMAL(5, 2) NOT NULL DEFAULT 100.00;
+                ALTER TABLE DanhSachCongViec ADD COLUMN isSystem TINYINT(1) NOT NULL DEFAULT 0;
             `);
         } catch (colErr) {
-            // Error code 1060 (ER_DUP_FIELDNAME) means column already exists
-            if (colErr.original?.errno !== 1060 && colErr.parent?.errno !== 1060) {
-                // Column might already exist or other DB dialect, ignore silently
-            }
+            // Error code 1060 (ER_DUP_FIELDNAME) means column already exists; 1146 means table not created yet
         }
 
-        // Update legacy records where contributionPercentage is NULL and enforce default
+        // Safe check and add contributionPercentage column to TimeSheets before sync if not exists
         try {
             await sequelize.query(`
-                UPDATE TimeSheets SET contributionPercentage = 100.00 WHERE contributionPercentage IS NULL;
+                ALTER TABLE TimeSheets ADD COLUMN contributionPercentage DECIMAL(5, 2) NOT NULL DEFAULT 0.00;
+            `);
+        } catch (colErr) {
+            // Error code 1060 means column already exists; 1146 means table not created yet
+        }
+
+        await sequelize.sync();
+        console.log("✅ Database synchronized with all models");
+
+        // Update legacy records in DanhSachCongViec: tasks created by admin or with null maNhanSu become system tasks
+        try {
+            await sequelize.query(`
+                UPDATE DanhSachCongViec SET isSystem = 1 WHERE maNhanSu IS NULL;
             `);
             await sequelize.query(`
-                ALTER TABLE TimeSheets MODIFY COLUMN contributionPercentage DECIMAL(5, 2) NOT NULL DEFAULT 100.00;
+                UPDATE DanhSachCongViec d
+                LEFT JOIN Auth a ON d.maNhanSu = a.maNhanSu
+                SET d.isSystem = 1
+                WHERE (LOWER(a.Role) IN ('admin', 'ceo') OR d.maNhanSu = 'admin');
+            `);
+            await sequelize.query(`
+                UPDATE DanhSachCongViec SET isSystem = 0 WHERE isSystem IS NULL;
             `);
         } catch (updateErr) {
-            // Ignore if already set or dialect not matching
+            // Ignore if already set
+        }
+
+        // Safe check and add index for isSystem on DanhSachCongViec
+        try {
+            await sequelize.query(`
+                ALTER TABLE DanhSachCongViec ADD INDEX idx_ds_cong_viec_is_system (isSystem);
+            `);
+        } catch (idxErr) {
+            // Ignore if index already exists (ER_DUP_KEYNAME)
+        }
+
+        // Update legacy records where contributionPercentage is NULL
+        try {
+            await sequelize.query(`
+                UPDATE TimeSheets SET contributionPercentage = 0.00 WHERE contributionPercentage IS NULL;
+            `);
+        } catch (updateErr) {
+            // Ignore if already set
         }
     } catch (err) {
         console.error("Database sync error:", err);

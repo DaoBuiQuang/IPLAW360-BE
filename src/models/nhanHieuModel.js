@@ -1,6 +1,7 @@
 import { DataTypes } from "sequelize";
 import { sequelize } from "../config/db.js";
 import { addAuditHooks } from "./addAuditHooks.js";
+import { fixMojibake } from "../utils/fixEncoding.js";
 
 export const NhanHieu = sequelize.define("NhanHieu", {
   maNhanHieu: {
@@ -11,6 +12,13 @@ export const NhanHieu = sequelize.define("NhanHieu", {
   tenNhanHieu: {
     type: DataTypes.STRING,
     allowNull: false,
+    get() {
+      const rawValue = this.getDataValue("tenNhanHieu");
+      return fixMojibake(rawValue);
+    },
+    set(val) {
+      this.setDataValue("tenNhanHieu", fixMojibake(val));
+    },
   },
   moTa: {
     type: DataTypes.STRING,
@@ -29,6 +37,18 @@ export const NhanHieu = sequelize.define("NhanHieu", {
 }, {
   timestamps: true,
   tableName: "NhanHieu",
+  hooks: {
+    beforeValidate: (instance) => {
+      if (instance.tenNhanHieu) {
+        instance.tenNhanHieu = fixMojibake(instance.tenNhanHieu);
+      }
+    },
+    beforeSave: (instance) => {
+      if (instance.tenNhanHieu) {
+        instance.tenNhanHieu = fixMojibake(instance.tenNhanHieu);
+      }
+    },
+  },
 });
 
-addAuditHooks(NhanHieu);
+addAuditHooks(NhanHieu);
