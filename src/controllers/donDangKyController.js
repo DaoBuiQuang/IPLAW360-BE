@@ -31,6 +31,52 @@ const buildTokensSearch = (val, field) => {
         [Op.and]: tokens.map(tok => ({ [field]: { [Op.like]: `%${tok}%` } }))
     };
 };
+
+// Helper for customer multi-field token search (tenKhachHang + maKhachHang)
+const buildCustomerSearch = (val) => {
+    if (!val) return undefined;
+    const tokens = String(val).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return undefined;
+    if (tokens.length === 1) {
+        return {
+            [Op.or]: [
+                { tenKhachHang: { [Op.like]: `%${tokens[0]}%` } },
+                { maKhachHang: { [Op.like]: `%${tokens[0]}%` } },
+            ]
+        };
+    }
+    return {
+        [Op.and]: tokens.map(tok => ({
+            [Op.or]: [
+                { tenKhachHang: { [Op.like]: `%${tok}%` } },
+                { maKhachHang: { [Op.like]: `%${tok}%` } },
+            ]
+        }))
+    };
+};
+
+// Helper for partner multi-field token search (tenDoiTac + maDoiTac)
+const buildPartnerSearch = (val) => {
+    if (!val) return undefined;
+    const tokens = String(val).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return undefined;
+    if (tokens.length === 1) {
+        return {
+            [Op.or]: [
+                { tenDoiTac: { [Op.like]: `%${tokens[0]}%` } },
+                { maDoiTac: { [Op.like]: `%${tokens[0]}%` } },
+            ]
+        };
+    }
+    return {
+        [Op.and]: tokens.map(tok => ({
+            [Op.or]: [
+                { tenDoiTac: { [Op.like]: `%${tok}%` } },
+                { maDoiTac: { [Op.like]: `%${tok}%` } },
+            ]
+        }))
+    };
+};
 const tinhHanXuLy = async (app, transaction = null) => {
     console.log("tessttttt 1")
     if (app.soBang) return null;
@@ -149,6 +195,10 @@ export const getAllApplication = async (req, res) => {
             pageIndex = 1,
             pageSize = 20,
         } = req.body;
+
+        const effectiveCustomerName = customerName || req.body?.tenKhachHang || req.body?.maKhachHang;
+        const effectivePartnerName = partnerName || req.body?.tenDoiTac || req.body?.maDoiTac;
+        const effectiveBrandName = brandName || req.body?.tenNhanHieu || req.body?.maNhanHieu;
 
         if (!fields.includes("maDonDangKy")) fields.push("maDonDangKy");
 
@@ -343,22 +393,22 @@ export const getAllApplication = async (req, res) => {
                         model: NhanHieu,
                         as: "nhanHieu",
                         attributes: ["tenNhanHieu", "linkAnh"],
-                        required: !!brandName,
-                        where: buildTokensSearch(brandName, "tenNhanHieu"),
+                        required: !!effectiveBrandName,
+                        where: buildTokensSearch(effectiveBrandName, "tenNhanHieu"),
                     },
                     {
                         model: KhachHangCuoi,
                         as: "khachHang",
-                        attributes: ["tenKhachHang"],
-                        required: !!customerName,
-                        where: buildTokensSearch(customerName, "tenKhachHang"),
+                        attributes: ["tenKhachHang", "maKhachHang"],
+                        required: !!effectiveCustomerName,
+                        where: buildCustomerSearch(effectiveCustomerName),
                     },
                     {
                         model: DoiTac,
                         as: "doitac",
-                        attributes: ["tenDoiTac"],
-                        required: !!partnerName,
-                        where: buildTokensSearch(partnerName, "tenDoiTac"),
+                        attributes: ["tenDoiTac", "maDoiTac"],
+                        required: !!effectivePartnerName,
+                        where: buildPartnerSearch(effectivePartnerName),
                     },
                 ],
                 limit: pageSize,

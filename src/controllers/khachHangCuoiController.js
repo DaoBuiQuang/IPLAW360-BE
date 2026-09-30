@@ -52,8 +52,8 @@ export const generateCustomerCode = async (req, res) => {
 
 export const getCustomerNamesAndCodes = async (req, res) => {
   try {
-    const { tenKhachHang, searchText, query } = req.body;
-    const searchVal = String(tenKhachHang || searchText || query || "").trim();
+    const { tenKhachHang, searchText, query, search, q } = req.body || {};
+    const searchVal = String(tenKhachHang || searchText || query || search || q || "").trim();
     const whereCondition = { daXoa: false };
 
     if (searchVal) {
@@ -73,12 +73,17 @@ export const getCustomerNamesAndCodes = async (req, res) => {
       }
     }
 
-    const customers = await KhachHangCuoi.findAll({
+    const queryOptions = {
       where: whereCondition,
       attributes: ["id", 'maKhachHang', 'tenKhachHang'],
       order: [["tenKhachHang", "ASC"]],
-      limit: req.body?.limit ? Number(req.body.limit) : 100,
-    });
+    };
+
+    if (req.body?.limit) {
+      queryOptions.limit = Number(req.body.limit);
+    }
+
+    const customers = await KhachHangCuoi.findAll(queryOptions);
 
     res.status(200).json(customers);
   } catch (error) {
