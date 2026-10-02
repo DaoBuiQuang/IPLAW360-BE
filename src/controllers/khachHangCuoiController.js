@@ -75,7 +75,15 @@ export const getCustomerNamesAndCodes = async (req, res) => {
 
     const queryOptions = {
       where: whereCondition,
-      attributes: ["id", 'maKhachHang', 'tenKhachHang'],
+      attributes: ["id", "maKhachHang", "tenKhachHang", "maDoiTac"],
+      include: [
+        {
+          model: DoiTac,
+          as: "doiTac",
+          attributes: ["id", "maDoiTac"],
+          required: false, // LEFT JOIN — giữ KH không có đối tác
+        }
+      ],
       order: [["tenKhachHang", "ASC"]],
     };
 
@@ -85,7 +93,16 @@ export const getCustomerNamesAndCodes = async (req, res) => {
 
     const customers = await KhachHangCuoi.findAll(queryOptions);
 
-    res.status(200).json(customers);
+    // Map lại để trả đúng shape mà FE cần: idDoiTac và maDoiTac ở top-level
+    const result = customers.map(c => ({
+      id: c.id,
+      maKhachHang: c.maKhachHang,
+      tenKhachHang: c.tenKhachHang,
+      idDoiTac: c.doiTac?.id ?? null,
+      maDoiTac: c.doiTac?.maDoiTac ?? null,
+    }));
+
+    res.status(200).json(result);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }

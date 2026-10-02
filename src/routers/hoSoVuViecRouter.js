@@ -144,16 +144,23 @@ router.post("/case/delete",authenticateUser, authorizeRoles("admin", "staff"), d
  * @swagger
  * /case/generate-code-case:
  *   post:
- *     summary: Sinh mã hồ sơ vụ việc tự động
+ *     summary: Sinh mã hồ sơ vụ việc tự động theo số thứ tự tiếp theo của khách hàng
  *     tags: [Case File]
  *     security:
  *       - bearerAuth: []
  *     requestBody:
- *       required: false
+ *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - maKhachHang
+ *             properties:
+ *               maKhachHang:
+ *                 type: string
+ *                 example: "J00025"
+ *                 description: Mã khách hàng cần sinh mã hồ sơ
  *     responses:
  *       200:
  *         description: Sinh mã thành công
@@ -162,11 +169,19 @@ router.post("/case/delete",authenticateUser, authorizeRoles("admin", "staff"), d
  *             schema:
  *               type: object
  *               properties:
+ *                 message:
+ *                   type: string
+ *                   example: "Tạo mã hồ sơ vụ việc thành công"
  *                 maHoSoVuViec:
  *                   type: string
- *                   example: "HSVV042"
+ *                   example: "J00025-00003"
+ *                   description: Mã hồ sơ = maKhachHang + "-" + số thứ tự 5 chữ số
+ *       400:
+ *         description: Thiếu mã khách hàng trong request body
  *       401:
- *         description: Không có quyền truy cập
+ *         description: Không có quyền truy cập (JWT không hợp lệ)
+ *       404:
+ *         description: Không tìm thấy khách hàng với mã đã cung cấp
  */
 router.post("/case/generate-code-case",authenticateUser, authorizeRoles("admin", "staff"), generateCaseCode);
 export default router;

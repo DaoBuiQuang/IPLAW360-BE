@@ -188,39 +188,38 @@ export const generateCaseCode = async (req, res) => {
             return res.status(400).json({ message: "Thiếu mã khách hàng" });
         }
 
-        // 🔎 Lấy idKhachHang từ bảng KhachHang
+        // 🔎 Kiểm tra khách hàng tồn tại trong DB
         const khachHang = await KhachHangCuoi.findOne({
             where: { maKhachHang }
         });
 
         if (!khachHang) {
-            return res.status(404).json({ message: "Không tìm thấy khách hàng" });
+            return res.status(404).json({ message: `Không tìm thấy khách hàng với mã "${maKhachHang}"` });
         }
 
-        const idKhachHang = khachHang.id;
-
-        // ✅ Đếm số bản ghi trong từng bảng theo idKhachHang
-        const count1 = await DonDangKy.count({
-            where: { idKhachHang }
+        // ✅ Tìm số thứ tự lớn nhất hiện có của KH này trong bảng HoSo_VuViec
+        // maHoSoVuViec có dạng: "J00025-00003" → lấy phần số sau dấu "-" cuối
+        const existingCases = await HoSo_VuViec.findAll({
+            where: { maKhachHang },
+            attributes: ["maHoSoVuViec"],
+            order: [["maHoSoVuViec", "DESC"]],
         });
 
-        const count2 = await DonDangKyNhanHieu_KH.count({
-            where: { idKhachHang }
-        });
+        let maxStt = 0;
+        for (const hoSo of existingCases) {
+            const parts = hoSo.maHoSoVuViec.split("-");
+            const sttPart = parseInt(parts[parts.length - 1], 10);
+            if (!isNaN(sttPart) && sttPart > maxStt) {
+                maxStt = sttPart;
+            }
+        }
 
-        const count3 = await DonGiaHan_NH_VN.count({
-            where: { idKhachHang }
-        });
-
-        const totalCount = count1 + count2 + count3;
-
-        const stt = (totalCount + 1).toString().padStart(5, "0");
-        const maHoSo = `${maKhachHang}-${stt}`;
+        const nextStt = (maxStt + 1).toString().padStart(5, "0");
+        const maHoSoVuViec = `${maKhachHang}-${nextStt}`;
 
         res.status(200).json({
             message: "Tạo mã hồ sơ vụ việc thành công",
-            maHoSoVuViec: maHoSo,
-            idKhachHang
+            maHoSoVuViec,
         });
     } catch (error) {
         res.status(500).json({ message: error.message });
