@@ -33,6 +33,32 @@ const router = express.Router();
  *     responses:
  *       200:
  *         description: Lấy danh sách thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 properties:
+ *                   id:
+ *                     type: integer
+ *                     example: 5
+ *                   maKhachHang:
+ *                     type: string
+ *                     example: "J00025"
+ *                   tenKhachHang:
+ *                     type: string
+ *                     example: "Công ty TNHH ABC"
+ *                   idDoiTac:
+ *                     type: integer
+ *                     nullable: true
+ *                     example: 3
+ *                     description: null nếu KH không liên kết với đối tác nào
+ *                   maDoiTac:
+ *                     type: string
+ *                     nullable: true
+ *                     example: "DT003"
+ *                     description: null nếu KH không liên kết với đối tác nào
  *       401:
  *         description: Không có quyền truy cập
  */
