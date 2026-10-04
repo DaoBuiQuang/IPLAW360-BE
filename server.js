@@ -1,4 +1,5 @@
 import express from "express";
+import mailRouter from "./src/routers/mailRouter.js";
 import dotenv from "dotenv";
 dotenv.config();
 import os from "os";
@@ -70,6 +71,7 @@ app.get('/', (req, res) => {
   return res.send('Hello World');
 });
 app.use("/api", authRouter)
+app.use("/api", mailRouter);
 app.use("/api", nhanSuRouter)
 app.use("/api", quocGiaRouter)
 app.use("/api", loaiVuViecRouter)
