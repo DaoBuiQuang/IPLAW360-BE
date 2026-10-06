@@ -11,7 +11,7 @@ import {
 import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
-const staffRoles = ["admin", "staff"];
+const allowedRoles = ["admin", "ceo", "manager", "staff"];
 
 /**
  * @swagger
@@ -28,26 +28,15 @@ const staffRoles = ["admin", "staff"];
  *           schema:
  *             type: object
  *             properties:
- *               searchText:
+ *               keyword:
  *                 type: string
- *                 example: "tư vấn"
+ *                 example: "ND"
  *               limit:
  *                 type: integer
- *                 default: 10
+ *                 default: 20
  *     responses:
  *       200:
  *         description: Tìm kiếm thành công
- *         content:
- *           application/json:
- *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   maCongViec:
- *                     type: string
- *                   tenCongViec:
- *                     type: string
  *       401:
  *         description: Không có quyền truy cập
  */
@@ -57,7 +46,7 @@ router.post("/ds-cong-viec/search", authenticateUser, searchDanhSachCongViec);
  * @swagger
  * /ds-cong-viec/list:
  *   post:
- *     summary: Lấy danh sách công việc (có phân trang)
+ *     summary: Lấy danh sách công việc thường nhật (có phân trang, phân quyền Hệ thống / Cá nhân)
  *     tags: [Task List]
  *     security:
  *       - bearerAuth: []
@@ -68,14 +57,18 @@ router.post("/ds-cong-viec/search", authenticateUser, searchDanhSachCongViec);
  *           schema:
  *             type: object
  *             properties:
- *               searchText:
+ *               keyword:
+ *                 type: string
+ *               isSystem:
+ *                 type: boolean
+ *               maNhanSu:
  *                 type: string
  *               pageIndex:
  *                 type: integer
  *                 default: 1
  *               pageSize:
  *                 type: integer
- *                 default: 20
+ *                 default: 50
  *     responses:
  *       200:
  *         description: Lấy danh sách thành công
@@ -88,7 +81,7 @@ router.post("/ds-cong-viec/list",   authenticateUser, listDanhSachCongViec);
  * @swagger
  * /ds-cong-viec/detail:
  *   post:
- *     summary: Lấy chi tiết một công việc
+ *     summary: Lấy chi tiết một công việc thường nhật
  *     tags: [Task List]
  *     security:
  *       - bearerAuth: []
@@ -99,16 +92,18 @@ router.post("/ds-cong-viec/list",   authenticateUser, listDanhSachCongViec);
  *           schema:
  *             type: object
  *             required:
- *               - maCongViec
+ *               - id
  *             properties:
- *               maCongViec:
- *                 type: string
- *                 example: "CV001"
+ *               id:
+ *                 type: integer
+ *                 example: 1
  *     responses:
  *       200:
  *         description: Lấy thông tin thành công
  *       401:
  *         description: Không có quyền truy cập
+ *       403:
+ *         description: Không có quyền xem công việc cá nhân này
  *       404:
  *         description: Không tìm thấy công việc
  */
@@ -118,7 +113,7 @@ router.post("/ds-cong-viec/detail", authenticateUser, getDanhSachCongViecById);
  * @swagger
  * /ds-cong-viec/add:
  *   post:
- *     summary: Thêm công việc mới vào danh sách
+ *     summary: Thêm công việc mới vào danh sách (admin/ceo tạo Hệ thống hoặc Cá nhân; staff/manager tạo Cá nhân)
  *     tags: [Task List]
  *     security:
  *       - bearerAuth: []
@@ -129,19 +124,17 @@ router.post("/ds-cong-viec/detail", authenticateUser, getDanhSachCongViecById);
  *           schema:
  *             type: object
  *             required:
- *               - tenCongViec
+ *               - maVietTat
  *             properties:
- *               tenCongViec:
+ *               maVietTat:
  *                 type: string
- *                 example: "Tư vấn pháp lý"
+ *                 example: "NĐ"
  *               moTa:
  *                 type: string
- *               donGia:
- *                 type: number
- *                 example: 500000
- *               donViTinh:
- *                 type: string
- *                 example: "giờ"
+ *                 example: "Nộp đơn đăng ký"
+ *               isSystem:
+ *                 type: boolean
+ *                 default: false
  *     responses:
  *       201:
  *         description: Thêm thành công
@@ -149,14 +142,16 @@ router.post("/ds-cong-viec/detail", authenticateUser, getDanhSachCongViecById);
  *         description: Dữ liệu không hợp lệ
  *       401:
  *         description: Không có quyền truy cập
+ *       409:
+ *         description: Trùng mã viết tắt
  */
-router.post("/ds-cong-viec/add",     authenticateUser, authorizeRoles(...staffRoles), createDanhSachCongViec);
+router.post("/ds-cong-viec/add",     authenticateUser, authorizeRoles(...allowedRoles), createDanhSachCongViec);
 
 /**
  * @swagger
  * /ds-cong-viec/edit:
  *   put:
- *     summary: Cập nhật công việc
+ *     summary: Cập nhật công việc thường nhật
  *     tags: [Task List]
  *     security:
  *       - bearerAuth: []
@@ -167,32 +162,34 @@ router.post("/ds-cong-viec/add",     authenticateUser, authorizeRoles(...staffRo
  *           schema:
  *             type: object
  *             required:
- *               - maCongViec
+ *               - id
  *             properties:
- *               maCongViec:
- *                 type: string
- *                 example: "CV001"
- *               tenCongViec:
+ *               id:
+ *                 type: integer
+ *                 example: 1
+ *               maVietTat:
  *                 type: string
  *               moTa:
  *                 type: string
- *               donGia:
- *                 type: number
+ *               isSystem:
+ *                 type: boolean
  *     responses:
  *       200:
  *         description: Cập nhật thành công
  *       401:
  *         description: Không có quyền truy cập
+ *       403:
+ *         description: Không có quyền chỉnh sửa công việc này
  *       404:
  *         description: Không tìm thấy công việc
  */
-router.put("/ds-cong-viec/edit",     authenticateUser, authorizeRoles(...staffRoles), updateDanhSachCongViec);
+router.put("/ds-cong-viec/edit",     authenticateUser, authorizeRoles(...allowedRoles), updateDanhSachCongViec);
 
 /**
  * @swagger
  * /ds-cong-viec/delete:
  *   delete:
- *     summary: Xóa mềm công việc
+ *     summary: Xóa mềm công việc thường nhật
  *     tags: [Task List]
  *     security:
  *       - bearerAuth: []
@@ -203,20 +200,22 @@ router.put("/ds-cong-viec/edit",     authenticateUser, authorizeRoles(...staffRo
  *           schema:
  *             type: object
  *             required:
- *               - maCongViec
+ *               - id
  *             properties:
- *               maCongViec:
- *                 type: string
- *                 example: "CV001"
+ *               id:
+ *                 type: integer
+ *                 example: 1
  *     responses:
  *       200:
  *         description: Xóa thành công
  *       401:
  *         description: Không có quyền truy cập
+ *       403:
+ *         description: Không có quyền xóa công việc này
  *       404:
  *         description: Không tìm thấy công việc
  */
-router.delete("/ds-cong-viec/delete", authenticateUser, authorizeRoles(...staffRoles), deleteDanhSachCongViec);
+router.delete("/ds-cong-viec/delete", authenticateUser, authorizeRoles(...allowedRoles), deleteDanhSachCongViec);
 
 /**
  * @swagger
@@ -233,19 +232,21 @@ router.delete("/ds-cong-viec/delete", authenticateUser, authorizeRoles(...staffR
  *           schema:
  *             type: object
  *             required:
- *               - maCongViec
+ *               - id
  *             properties:
- *               maCongViec:
- *                 type: string
- *                 example: "CV001"
+ *               id:
+ *                 type: integer
+ *                 example: 1
  *     responses:
  *       200:
  *         description: Khôi phục thành công
  *       401:
  *         description: Không có quyền truy cập
+ *       403:
+ *         description: Không có quyền khôi phục công việc này
  *       404:
  *         description: Không tìm thấy công việc
  */
-router.post("/ds-cong-viec/restore", authenticateUser, authorizeRoles(...staffRoles), restoreDanhSachCongViec);
+router.post("/ds-cong-viec/restore", authenticateUser, authorizeRoles(...allowedRoles), restoreDanhSachCongViec);
 
 export default router;

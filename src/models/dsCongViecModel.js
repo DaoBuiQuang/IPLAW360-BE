@@ -37,6 +37,13 @@ export const DanhSachCongViec = sequelize.define(
       allowNull: true,
       comment: "Mã nhân sự tạo danh mục",
     },
+    // Phân loại: công việc Hệ thống (toàn công ty) hay Cá nhân
+    isSystem: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+      comment: "true: công việc Hệ thống do Admin/CEO tạo, false: công việc Cá nhân",
+    },
     // deletedAt do Sequelize paranoid tự quản lý (soft delete)
     deletedAt: {
       type: DataTypes.DATE,
