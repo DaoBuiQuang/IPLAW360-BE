@@ -6,6 +6,7 @@ import { NganhNghe } from "./nganhNgheModel.js";
 import { addAuditHooks } from "./addAuditHooks.js";
 import { NhomKhachHang } from "./nhomKhachHangModel.js";
 import { NhanSu } from "./nhanSuModel.js";
+import { fixMojibake } from "../utils/fixEncoding.js";
 export const KhachHangCuoi = sequelize.define("KhachHangCuoi", {
     id: {
         type: DataTypes.INTEGER,
@@ -25,6 +26,13 @@ export const KhachHangCuoi = sequelize.define("KhachHangCuoi", {
     tenKhachHang: {
         type: DataTypes.STRING,
         allowNull: false,
+        get() {
+            const rawValue = this.getDataValue("tenKhachHang");
+            return fixMojibake(rawValue);
+        },
+        set(val) {
+            this.setDataValue("tenKhachHang", fixMojibake(val));
+        },
     },
     maDoiTac: {
         type: DataTypes.STRING,

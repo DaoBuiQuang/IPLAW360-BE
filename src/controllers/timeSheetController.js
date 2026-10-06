@@ -63,7 +63,7 @@ const enrichTimeSheets = async (timeSheets) => {
 
     return timeSheets.map(item => {
         const json = item.toJSON();
-        const contributionPercentage = json.contributionPercentage != null ? Number(json.contributionPercentage) : 100;
+        const contributionPercentage = json.contributionPercentage !== undefined && json.contributionPercentage !== null ? Number(json.contributionPercentage) : 0;
         return {
             ...json,
             contributionPercentage,
@@ -201,7 +201,7 @@ export const createTimeSheet = async (req, res) => {
         if (workData.error) return res.status(400).json({ message: workData.error });
 
         const rawContribution = req.body.contributionPercentage ?? req.body.contributionRate;
-        let contributionPercentage = 100.00;
+        let contributionPercentage = 0;
         if (rawContribution !== undefined && rawContribution !== null && rawContribution !== "") {
             const parsed = Number(rawContribution);
             if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
@@ -262,7 +262,7 @@ export const updateTimeSheet = async (req, res) => {
         const rawContribution = req.body.contributionPercentage ?? req.body.contributionRate;
         if (rawContribution !== undefined) {
             if (rawContribution === null || rawContribution === "") {
-                timeSheet.contributionPercentage = 100.00;
+                timeSheet.contributionPercentage = 0;
             } else {
                 const parsed = Number(rawContribution);
                 if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
@@ -569,7 +569,7 @@ export const getTimeSheetSummary = async (req, res) => {
             result.totalItems += 1;
 
             if (item.caseCode) {
-                const rate = item.contributionPercentage != null ? (Number(item.contributionPercentage) || 0) : 100;
+                const rate = item.contributionPercentage !== undefined && item.contributionPercentage !== null ? (Number(item.contributionPercentage) || 0) : 0;
                 if (!caseContributions[item.caseCode]) {
                     caseContributions[item.caseCode] = {
                         caseCode: item.caseCode,
@@ -637,7 +637,7 @@ export const checkCaseContributions = async (req, res) => {
                     employees: new Set(),
                 };
             }
-            const rate = row.contributionPercentage != null ? (Number(row.contributionPercentage) || 0) : 100;
+            const rate = row.contributionPercentage !== undefined && row.contributionPercentage !== null ? (Number(row.contributionPercentage) || 0) : 0;
             caseMap[code].totalContribution += rate;
             caseMap[code].recordsCount += 1;
             if (row.employeeCode) caseMap[code].employees.add(row.employeeCode);
