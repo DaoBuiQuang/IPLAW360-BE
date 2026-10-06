@@ -1,14 +1,71 @@
-// controllers/NH_VN_SD/donSuaDoi_NH_VNController.js
 import { sequelize } from "../../config/db.js";
 import { DonDangKy } from "../../models/donDangKyModel.js";
 import { KhachHangCuoi } from "../../models/khanhHangCuoiModel.js";
 import { DonSuaDoi_NH_VN } from "../../models/VN_SuaDoi_NH/donSuaDoiNH_VNModel.js";
-import { DonDK_SPDV } from "../../models/donDK_SPDVMolel.js"
+import { DonDK_SPDV } from "../../models/donDK_SPDVMolel.js";
 import crypto from "crypto";
 import { GCN_NH } from "../../models/GCN_NHModel.js";
 import { DonSuaDoiGCN_NH_VN } from "../../models/VN_SuaDoi_NH/donSuaDoiGCN_NH_VNModel.js";
 import { NhanHieu } from "../../models/nhanHieuModel.js";
 import { DoiTac } from "../../models/doiTacModel.js";
+import { Op, literal, Sequelize } from "sequelize";
+
+// Helper for token-based substring search (case-insensitive)
+const buildTokensSearch = (val, field) => {
+    if (!val) return undefined;
+    const tokens = String(val).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return undefined;
+    if (tokens.length === 1) return { [field]: { [Op.like]: `%${tokens[0]}%` } };
+    return {
+        [Op.and]: tokens.map(tok => ({ [field]: { [Op.like]: `%${tok}%` } }))
+    };
+};
+
+// Helper for customer multi-field token search (tenKhachHang + maKhachHang)
+const buildCustomerSearch = (val) => {
+    if (!val) return undefined;
+    const tokens = String(val).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return undefined;
+    if (tokens.length === 1) {
+        return {
+            [Op.or]: [
+                { tenKhachHang: { [Op.like]: `%${tokens[0]}%` } },
+                { maKhachHang: { [Op.like]: `%${tokens[0]}%` } },
+            ]
+        };
+    }
+    return {
+        [Op.and]: tokens.map(tok => ({
+            [Op.or]: [
+                { tenKhachHang: { [Op.like]: `%${tok}%` } },
+                { maKhachHang: { [Op.like]: `%${tok}%` } },
+            ]
+        }))
+    };
+};
+
+// Helper for partner multi-field token search (tenDoiTac + maDoiTac)
+const buildPartnerSearch = (val) => {
+    if (!val) return undefined;
+    const tokens = String(val).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return undefined;
+    if (tokens.length === 1) {
+        return {
+            [Op.or]: [
+                { tenDoiTac: { [Op.like]: `%${tokens[0]}%` } },
+                { maDoiTac: { [Op.like]: `%${tokens[0]}%` } },
+            ]
+        };
+    }
+    return {
+        [Op.and]: tokens.map(tok => ({
+            [Op.or]: [
+                { tenDoiTac: { [Op.like]: `%${tok}%` } },
+                { maDoiTac: { [Op.like]: `%${tok}%` } },
+            ]
+        }))
+    };
+};
 // const generateMaDonDangKy = (maHoSo) => {
 //     const randomStr = crypto.randomBytes(3).toString("hex"); // 6 ký tự hex
 //     return `${maHoSo}_${randomStr}`;
@@ -167,25 +224,43 @@ export const addApplicationSD_GCN_NHVN = async (req, res) => {
 
 export const getAllApplication_SD_GCN_VN = async (req, res) => {
     try {
-        const { soBang, pageIndex = 1, pageSize = 20 } = req.body;
+        const {
+            soBang,
+            searchText,
+            customerName,
+            partnerName,
+            brandName,
+            pageIndex = 1,
+            pageSize = 20,
+        } = req.body;
         const offset = (pageIndex - 1) * pageSize;
+
+        const searchTerm = String(searchText || soBang || "").trim();
+        const effectiveCustomerName = customerName || req.body?.tenKhachHang || req.body?.maKhachHang;
+        const effectivePartnerName = partnerName || req.body?.tenDoiTac || req.body?.maDoiTac;
+        const effectiveBrandName = brandName || req.body?.tenNhanHieu || req.body?.maNhanHieu;
 
         const whereCondition = {};
 
-        // ✅ Nếu người dùng nhập "soBang", sẽ tìm cả theo soAffidavit hoặc số bằng của GCN
-        if (soBang) {
+        // ✅ Nếu có searchText hoặc soBang: tìm theo số đơn SD GCN, số bằng, số đơn, mã hồ sơ của GCN
+        if (searchTerm) {
             whereCondition[Op.or] = [
-                { soDon: { [Op.like]: `%${soBang}%` } },
-                { "$gcn.soBang$": { [Op.like]: `%${soBang}%` } },
+                { "$DonSuaDoiGCN_NH_VN.soDon$": { [Op.like]: `%${searchTerm}%` } },
+                { "$gcn.soBang$": { [Op.like]: `%${searchTerm}%` } },
+                { "$gcn.soDon$": { [Op.like]: `%${searchTerm}%` } },
+                { "$gcn.maHoSo$": { [Op.like]: `%${searchTerm}%` } },
             ];
         }
 
         const { count: totalItems, rows } = await DonSuaDoiGCN_NH_VN.findAndCountAll({
             where: whereCondition,
+            distinct: true,
+            col: "id",
             include: [
                 {
                     model: GCN_NH,
                     as: "gcn",
+                    required: !!(effectiveBrandName || effectiveCustomerName || effectivePartnerName),
                     attributes: [
                         "id",
                         "soBang",
@@ -203,16 +278,22 @@ export const getAllApplication_SD_GCN_VN = async (req, res) => {
                             model: NhanHieu,
                             as: "NhanHieu",
                             attributes: ["tenNhanHieu"],
+                            required: !!effectiveBrandName,
+                            where: buildTokensSearch(effectiveBrandName, "tenNhanHieu"),
                         },
                         {
                             model: KhachHangCuoi,
                             as: "KhachHangCuoi",
-                            attributes: ["tenKhachHang"],
+                            attributes: ["tenKhachHang", "maKhachHang"],
+                            required: !!effectiveCustomerName,
+                            where: buildCustomerSearch(effectiveCustomerName),
                         },
                         {
                             model: DoiTac,
                             as: "DoiTac",
-                            attributes: ["tenDoiTac"],
+                            attributes: ["tenDoiTac", "maDoiTac"],
+                            required: !!effectivePartnerName,
+                            where: buildPartnerSearch(effectivePartnerName),
                         },
                     ],
                 },
@@ -232,9 +313,9 @@ export const getAllApplication_SD_GCN_VN = async (req, res) => {
             },
         });
     } catch (error) {
-        console.error("❌ Lỗi khi lấy danh sách đơn gia hạn:", error);
+        console.error("Lỗi application_sd_gcn_nh_vn/list:", error);
         return res.status(500).json({
-            message: "Lỗi khi lấy danh sách đơn gia hạn",
+            message: "Lỗi khi lấy danh sách đơn sửa đổi GCN",
             error: error.message,
         });
     }

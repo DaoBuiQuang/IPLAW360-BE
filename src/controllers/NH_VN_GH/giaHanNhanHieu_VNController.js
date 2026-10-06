@@ -161,27 +161,102 @@ import { DoiTac } from "../../models/doiTacModel.js";
 //     }
 // };
 
+// Helper for token-based substring search (case-insensitive)
+const buildTokensSearch = (val, field) => {
+    if (!val) return undefined;
+    const tokens = String(val).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return undefined;
+    if (tokens.length === 1) return { [field]: { [Op.like]: `%${tokens[0]}%` } };
+    return {
+        [Op.and]: tokens.map(tok => ({ [field]: { [Op.like]: `%${tok}%` } }))
+    };
+};
+
+// Helper for customer multi-field token search (tenKhachHang + maKhachHang)
+const buildCustomerSearch = (val) => {
+    if (!val) return undefined;
+    const tokens = String(val).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return undefined;
+    if (tokens.length === 1) {
+        return {
+            [Op.or]: [
+                { tenKhachHang: { [Op.like]: `%${tokens[0]}%` } },
+                { maKhachHang: { [Op.like]: `%${tokens[0]}%` } },
+            ]
+        };
+    }
+    return {
+        [Op.and]: tokens.map(tok => ({
+            [Op.or]: [
+                { tenKhachHang: { [Op.like]: `%${tok}%` } },
+                { maKhachHang: { [Op.like]: `%${tok}%` } },
+            ]
+        }))
+    };
+};
+
+// Helper for partner multi-field token search (tenDoiTac + maDoiTac)
+const buildPartnerSearch = (val) => {
+    if (!val) return undefined;
+    const tokens = String(val).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return undefined;
+    if (tokens.length === 1) {
+        return {
+            [Op.or]: [
+                { tenDoiTac: { [Op.like]: `%${tokens[0]}%` } },
+                { maDoiTac: { [Op.like]: `%${tokens[0]}%` } },
+            ]
+        };
+    }
+    return {
+        [Op.and]: tokens.map(tok => ({
+            [Op.or]: [
+                { tenDoiTac: { [Op.like]: `%${tok}%` } },
+                { maDoiTac: { [Op.like]: `%${tok}%` } },
+            ]
+        }))
+    };
+};
+
 export const getAllApplication_GH_VN = async (req, res) => {
     try {
-        const { soBang, pageIndex = 1, pageSize = 20 } = req.body;
+        const {
+            soBang,
+            searchText,
+            customerName,
+            partnerName,
+            brandName,
+            pageIndex = 1,
+            pageSize = 20,
+        } = req.body;
         const offset = (pageIndex - 1) * pageSize;
+
+        const searchTerm = String(searchText || soBang || "").trim();
+        const effectiveCustomerName = customerName || req.body?.tenKhachHang || req.body?.maKhachHang;
+        const effectivePartnerName = partnerName || req.body?.tenDoiTac || req.body?.maDoiTac;
+        const effectiveBrandName = brandName || req.body?.tenNhanHieu || req.body?.maNhanHieu;
 
         const whereCondition = {};
 
-        // ✅ Nếu người dùng nhập "soBang", sẽ tìm cả theo soDon hoặc số bằng của GCN
-        if (soBang) {
+        // ✅ Nếu người dùng nhập "searchText" hoặc "soBang", sẽ tìm trong số đơn gia hạn soDon, số bằng GCN.soBang, số đơn gốc GCN.soDon, mã hồ sơ GCN.maHoSo
+        if (searchTerm) {
             whereCondition[Op.or] = [
-                { soDon: { [Op.like]: `%${soBang}%` } },
-                { "$gcn.soBang$": { [Op.like]: `%${soBang}%` } },
+                { "$DonGiaHan_NH_VN.soDon$": { [Op.like]: `%${searchTerm}%` } },
+                { "$gcn.soBang$": { [Op.like]: `%${searchTerm}%` } },
+                { "$gcn.soDon$": { [Op.like]: `%${searchTerm}%` } },
+                { "$gcn.maHoSo$": { [Op.like]: `%${searchTerm}%` } },
             ];
         }
 
         const { count: totalItems, rows } = await DonGiaHan_NH_VN.findAndCountAll({
             where: whereCondition,
+            distinct: true,
+            col: "id",
             include: [
                 {
                     model: GCN_NH,
                     as: "gcn",
+                    required: !!(effectiveBrandName || effectiveCustomerName || effectivePartnerName),
                     attributes: [
                         "id",
                         "soBang",
@@ -195,9 +270,27 @@ export const getAllApplication_GH_VN = async (req, res) => {
                         "ngayNopDon",
                     ],
                     include: [
-                        { model: NhanHieu, as: "NhanHieu", attributes: ["tenNhanHieu"] },
-                        { model: KhachHangCuoi, as: "KhachHangCuoi", attributes: ["tenKhachHang"] },
-                        { model: DoiTac, as: "DoiTac", attributes: ["tenDoiTac"] },
+                        {
+                            model: NhanHieu,
+                            as: "NhanHieu",
+                            attributes: ["tenNhanHieu"],
+                            required: !!effectiveBrandName,
+                            where: buildTokensSearch(effectiveBrandName, "tenNhanHieu"),
+                        },
+                        {
+                            model: KhachHangCuoi,
+                            as: "KhachHangCuoi",
+                            attributes: ["tenKhachHang", "maKhachHang"],
+                            required: !!effectiveCustomerName,
+                            where: buildCustomerSearch(effectiveCustomerName),
+                        },
+                        {
+                            model: DoiTac,
+                            as: "DoiTac",
+                            attributes: ["tenDoiTac", "maDoiTac"],
+                            required: !!effectivePartnerName,
+                            where: buildPartnerSearch(effectivePartnerName),
+                        },
                     ],
                 },
             ],

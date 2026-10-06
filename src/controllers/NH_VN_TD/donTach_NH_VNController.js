@@ -10,6 +10,63 @@ import { DoiTac, DonTachNH_KH, KhachHangCuoi, NhanHieu, TaiLieu } from "../../mo
 import { Op, literal, Sequelize } from "sequelize";
 import { TaiLieu_KH } from "../../models/KH/taiLieuKH_Model.js";
 
+// Helper for token-based substring search (case-insensitive)
+const buildTokensSearch = (val, field) => {
+    if (!val) return undefined;
+    const tokens = String(val).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return undefined;
+    if (tokens.length === 1) return { [field]: { [Op.like]: `%${tokens[0]}%` } };
+    return {
+        [Op.and]: tokens.map(tok => ({ [field]: { [Op.like]: `%${tok}%` } }))
+    };
+};
+
+// Helper for customer multi-field token search (tenKhachHang + maKhachHang)
+const buildCustomerSearch = (val) => {
+    if (!val) return undefined;
+    const tokens = String(val).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return undefined;
+    if (tokens.length === 1) {
+        return {
+            [Op.or]: [
+                { tenKhachHang: { [Op.like]: `%${tokens[0]}%` } },
+                { maKhachHang: { [Op.like]: `%${tokens[0]}%` } },
+            ]
+        };
+    }
+    return {
+        [Op.and]: tokens.map(tok => ({
+            [Op.or]: [
+                { tenKhachHang: { [Op.like]: `%${tok}%` } },
+                { maKhachHang: { [Op.like]: `%${tok}%` } },
+            ]
+        }))
+    };
+};
+
+// Helper for partner multi-field token search (tenDoiTac + maDoiTac)
+const buildPartnerSearch = (val) => {
+    if (!val) return undefined;
+    const tokens = String(val).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return undefined;
+    if (tokens.length === 1) {
+        return {
+            [Op.or]: [
+                { tenDoiTac: { [Op.like]: `%${tokens[0]}%` } },
+                { maDoiTac: { [Op.like]: `%${tokens[0]}%` } },
+            ]
+        };
+    }
+    return {
+        [Op.and]: tokens.map(tok => ({
+            [Op.or]: [
+                { tenDoiTac: { [Op.like]: `%${tok}%` } },
+                { maDoiTac: { [Op.like]: `%${tok}%` } },
+            ]
+        }))
+    };
+};
+
 const generateMaDonDangKy = (maHoSo) => {
     const randomStr = crypto.randomBytes(3).toString("hex"); // 6 ký tự hex
     return `${maHoSo}_${randomStr}`;
@@ -211,13 +268,13 @@ export const getAllApplicationTD_VN = async (req, res) => {
             pageSize = 20
         } = req.body;
 
+        const effectiveCustomerName = customerName || req.body?.tenKhachHang || req.body?.maKhachHang;
+        const effectivePartnerName = partnerName || req.body?.tenDoiTac || req.body?.maDoiTac;
+        const effectiveBrandName = brandName || req.body?.tenNhanHieu || req.body?.maNhanHieu;
+
         // luôn đảm bảo có các field tối thiểu
         if (!fields.includes("maDonDangKy")) fields.push("maDonDangKy");
         if (!fields.includes("donGoc")) fields.push("donGoc");
-
-        // nếu FE có xin thêm các field thông tin sửa đổi thì push vào
-        // ví dụ FE gửi: ["soDonSD", "ngayYeuCau", "lanSuaDoi", "duocGhiNhanSuaDoi", ...]
-        // ở đây mình không ép buộc, chỉ handle nếu có
 
         const offset = (pageIndex - 1) * pageSize;
         const {
@@ -235,17 +292,39 @@ export const getAllApplicationTD_VN = async (req, res) => {
         // ====== Lọc cơ bản ======
         if (trangThaiDon) whereCondition.trangThaiDon = trangThaiDon;
 
-        // ====== Tìm kiếm (soDon, maHoSoVuViec, clientsRef) ======
+        // ====== Tìm kiếm (soDon, maHoSoVuViec, clientsRef, tenNhanHieu) ======
         if (searchText) {
-            const normalizedSearch = searchText.replace(/-/g, "");
-            whereCondition[Op.or] = [
-                { soDon: { [Op.like]: `%${searchText}%` } },
-                literal(`REPLACE(soDon, '-', '') LIKE '%${normalizedSearch}%'`),
-                { maHoSoVuViec: { [Op.like]: `%${searchText}%` } },
-                literal(`REPLACE(maHoSoVuViec, '-', '') LIKE '%${normalizedSearch}%'`),
-                { clientsRef: { [Op.like]: `%${searchText}%` } },
-                literal(`REPLACE(clientsRef, '-', '') LIKE '%${normalizedSearch}%'`)
-            ];
+            const raw = String(searchText).trim();
+            const tokens = raw.split(/\s+/).filter(Boolean);
+            const normalizedSearch = raw.replace(/-/g, "");
+
+            if (tokens.length <= 1) {
+                whereCondition[Op.or] = [
+                    { '$DonDangKy.soDon$': { [Op.like]: `%${raw}%` } },
+                    literal(`REPLACE(\`DonDangKy\`.\`soDon\`, '-', '') LIKE '%${normalizedSearch}%'`),
+                    { '$DonDangKy.maHoSoVuViec$': { [Op.like]: `%${raw}%` } },
+                    literal(`REPLACE(\`DonDangKy\`.\`maHoSoVuViec\`, '-', '') LIKE '%${normalizedSearch}%'`),
+                    { '$DonDangKy.clientsRef$': { [Op.like]: `%${raw}%` } },
+                    literal(`REPLACE(\`DonDangKy\`.\`clientsRef\`, '-', '') LIKE '%${normalizedSearch}%'`),
+                    { '$nhanHieu.tenNhanHieu$': { [Op.like]: `%${raw}%` } },
+                ];
+            } else {
+                whereCondition[Op.and] = whereCondition[Op.and] || [];
+                tokens.forEach((tok) => {
+                    const normTok = tok.replace(/-/g, "");
+                    whereCondition[Op.and].push({
+                        [Op.or]: [
+                            { '$DonDangKy.soDon$': { [Op.like]: `%${tok}%` } },
+                            literal(`REPLACE(\`DonDangKy\`.\`soDon\`, '-', '') LIKE '%${normTok}%'`),
+                            { '$DonDangKy.maHoSoVuViec$': { [Op.like]: `%${tok}%` } },
+                            literal(`REPLACE(\`DonDangKy\`.\`maHoSoVuViec\`, '-', '') LIKE '%${normTok}%'`),
+                            { '$DonDangKy.clientsRef$': { [Op.like]: `%${tok}%` } },
+                            literal(`REPLACE(\`DonDangKy\`.\`clientsRef\`, '-', '') LIKE '%${normTok}%'`),
+                            { '$nhanHieu.tenNhanHieu$': { [Op.like]: `%${tok}%` } },
+                        ],
+                    });
+                });
+            }
         }
 
         // ====== Lọc theo ngày (selectedField) ======
@@ -358,48 +437,54 @@ export const getAllApplicationTD_VN = async (req, res) => {
                         model: NhanHieu,
                         as: "nhanHieu",
                         attributes: ["tenNhanHieu", "linkAnh"],
-                        required: !!brandName,
-                        where: brandName
-                            ? { tenNhanHieu: { [Op.like]: `%${brandName}%` } }
-                            : undefined,
+                        required: !!effectiveBrandName,
+                        where: buildTokensSearch(effectiveBrandName, "tenNhanHieu"),
                     },
                     {
                         model: KhachHangCuoi,
                         as: "khachHang",
-                        attributes: ["tenKhachHang"],
-                        required: !!customerName,
-                        where: customerName
-                            ? { tenKhachHang: { [Op.like]: `%${customerName}%` } }
-                            : undefined,
+                        attributes: ["tenKhachHang", "maKhachHang"],
+                        required: !!effectiveCustomerName,
+                        where: buildCustomerSearch(effectiveCustomerName),
                     },
                     {
                         model: DoiTac,
                         as: "doitac",
-                        attributes: ["tenDoiTac"],
-                        required: !!partnerName,
-                        where: partnerName
-                            ? { tenDoiTac: { [Op.like]: `%${partnerName}%` } }
-                            : undefined,
+                        attributes: ["tenDoiTac", "maDoiTac"],
+                        required: !!effectivePartnerName,
+                        where: buildPartnerSearch(effectivePartnerName),
                     },
-                    // ====== include thêm thông tin ĐƠN SỬA ĐỔI ======
+                    // ====== include thêm thông tin ĐƠN TÁCH ======
                     {
                         model: DonTachNH_VN,
                         as: "donTach",
                         required: false,
                         attributes: [
+                            "soDon",
                             "ngayYeuCau",
                             "lanTachDon",
                             "ngayGhiNhanTachDon",
+                            "ndTachDon",
+                            "moTa",
                         ],
                     },
                 ],
+                subQuery: false,
                 limit: pageSize,
                 offset,
                 order,
             });
 
         if (!applications.length) {
-            return res.status(404).json({ message: "Không có đơn đăng ký nào" });
+            return res.status(200).json({
+                data: [],
+                pagination: {
+                    totalItems: 0,
+                    totalPages: 0,
+                    pageIndex: Number(pageIndex),
+                    pageSize: Number(pageSize),
+                },
+            });
         }
 
         // ====== Map kết quả ======
