@@ -158,6 +158,312 @@ export const getCaseCodeOptions = async (req, res) => {
     }
 };
 
+export const getCaseInfo = async (req, res) => {
+    try {
+        const { caseCode } = req.body || {};
+        if (!caseCode || typeof caseCode !== "string" || !caseCode.trim()) {
+            return res.status(200).json({
+                caseCode: caseCode || null,
+                customerCode: null,
+                partnerCode: null,
+                countryCode: null,
+            });
+        }
+
+        const code = caseCode.trim();
+
+        // 1. HoSo_VuViec: maHoSoVuViec = caseCode -> Lấy maKhachHang, maDoiTac, maQuocGiaVuViec
+        try {
+            const hsvv = await HoSo_VuViec.findOne({
+                where: { maHoSoVuViec: code },
+                attributes: ["maKhachHang", "maDoiTac", "maQuocGiaVuViec"],
+                raw: true,
+            });
+            if (hsvv) {
+                return res.status(200).json({
+                    caseCode: code,
+                    customerCode: hsvv.maKhachHang || null,
+                    partnerCode: hsvv.maDoiTac || null,
+                    countryCode: hsvv.maQuocGiaVuViec || null,
+                });
+            }
+        } catch (err) {
+            console.error("Lỗi tra cứu HoSo_VuViec:", err?.message);
+        }
+
+        // 2. DonDangKy: maHoSo = caseCode -> Join KhachHangCuoi lấy maKhachHang, Join DoiTac lấy maDoiTac
+        try {
+            const don = await DonDangKy.findOne({
+                where: { maHoSo: code },
+                include: [
+                    {
+                        model: KhachHangCuoi,
+                        as: "khachHang",
+                        attributes: ["maKhachHang", "maQuocGia"],
+                        required: false,
+                    },
+                    {
+                        model: DoiTac,
+                        as: "doitac",
+                        attributes: ["maDoiTac", "maQuocGia"],
+                        required: false,
+                    },
+                ],
+                order: [["createdAt", "DESC"]],
+            });
+            if (don) {
+                let customerCode = don.khachHang?.maKhachHang || null;
+                let partnerCode = don.doitac?.maDoiTac || null;
+                let countryCode = don.khachHang?.maQuocGia || don.doitac?.maQuocGia || "VN";
+
+                if (!customerCode && don.idKhachHang) {
+                    const kh = await KhachHangCuoi.findByPk(don.idKhachHang, { attributes: ["maKhachHang", "maQuocGia"], raw: true }).catch(() => null);
+                    if (kh?.maKhachHang) {
+                        customerCode = kh.maKhachHang;
+                        if (!countryCode && kh.maQuocGia) countryCode = kh.maQuocGia;
+                    }
+                }
+                if (!partnerCode && don.idDoiTac) {
+                    const dt = await DoiTac.findByPk(don.idDoiTac, { attributes: ["maDoiTac", "maQuocGia"], raw: true }).catch(() => null);
+                    if (dt?.maDoiTac) partnerCode = dt.maDoiTac;
+                }
+
+                return res.status(200).json({
+                    caseCode: code,
+                    customerCode: customerCode || null,
+                    partnerCode: partnerCode || null,
+                    countryCode: countryCode || null,
+                });
+            }
+        } catch (err) {
+            console.error("Lỗi tra cứu DonDangKy:", err?.message);
+        }
+
+        // 3. VuViec: maHoSo = caseCode -> Lấy idKhachHang -> maKhachHang, idDoiTac -> maDoiTac, maQuocGiaVuViec
+        try {
+            const vuViec = await VuViec.findOne({
+                where: { maHoSo: code },
+                include: [
+                    {
+                        model: KhachHangCuoi,
+                        as: "KhachHangCuoi",
+                        attributes: ["maKhachHang", "maQuocGia"],
+                        required: false,
+                    },
+                    {
+                        model: DoiTac,
+                        as: "DoiTac",
+                        attributes: ["maDoiTac", "maQuocGia"],
+                        required: false,
+                    },
+                ],
+                order: [["createdAt", "DESC"]],
+            });
+            if (vuViec) {
+                let customerCode = vuViec.KhachHangCuoi?.maKhachHang || null;
+                let partnerCode = vuViec.DoiTac?.maDoiTac || null;
+                let countryCode = vuViec.maQuocGiaVuViec || vuViec.KhachHangCuoi?.maQuocGia || null;
+
+                if (!customerCode && vuViec.idKhachHang) {
+                    const kh = await KhachHangCuoi.findByPk(vuViec.idKhachHang, { attributes: ["maKhachHang", "maQuocGia"], raw: true }).catch(() => null);
+                    if (kh?.maKhachHang) {
+                        customerCode = kh.maKhachHang;
+                        if (!countryCode && kh.maQuocGia) countryCode = kh.maQuocGia;
+                    }
+                }
+                if (!partnerCode && vuViec.idDoiTac) {
+                    const dt = await DoiTac.findByPk(vuViec.idDoiTac, { attributes: ["maDoiTac", "maQuocGia"], raw: true }).catch(() => null);
+                    if (dt?.maDoiTac) partnerCode = dt.maDoiTac;
+                }
+
+                return res.status(200).json({
+                    caseCode: code,
+                    customerCode: customerCode || null,
+                    partnerCode: partnerCode || null,
+                    countryCode: countryCode || null,
+                });
+            }
+        } catch (err) {
+            console.error("Lỗi tra cứu VuViec:", err?.message);
+        }
+
+        // 4. GCN_NH: maHoSo = caseCode -> Lấy tương tự
+        try {
+            const gcn = await GCN_NH.findOne({
+                where: { maHoSo: code },
+                include: [
+                    {
+                        model: KhachHangCuoi,
+                        as: "KhachHangCuoi",
+                        attributes: ["maKhachHang", "maQuocGia"],
+                        required: false,
+                    },
+                    {
+                        model: DoiTac,
+                        as: "DoiTac",
+                        attributes: ["maDoiTac"],
+                        required: false,
+                    },
+                ],
+                order: [["createdAt", "DESC"]],
+            });
+            if (gcn) {
+                let customerCode = gcn.KhachHangCuoi?.maKhachHang || null;
+                let partnerCode = gcn.DoiTac?.maDoiTac || null;
+                let countryCode = gcn.maQuocGia || gcn.KhachHangCuoi?.maQuocGia || "VN";
+
+                if (!customerCode && gcn.idKhachHang) {
+                    const kh = await KhachHangCuoi.findByPk(gcn.idKhachHang, { attributes: ["maKhachHang", "maQuocGia"], raw: true }).catch(() => null);
+                    if (kh?.maKhachHang) {
+                        customerCode = kh.maKhachHang;
+                        if (!countryCode && kh.maQuocGia) countryCode = kh.maQuocGia;
+                    }
+                }
+                if (!partnerCode && gcn.idDoiTac) {
+                    const dt = await DoiTac.findByPk(gcn.idDoiTac, { attributes: ["maDoiTac"], raw: true }).catch(() => null);
+                    if (dt?.maDoiTac) partnerCode = dt.maDoiTac;
+                }
+
+                return res.status(200).json({
+                    caseCode: code,
+                    customerCode: customerCode || null,
+                    partnerCode: partnerCode || null,
+                    countryCode: countryCode || null,
+                });
+            }
+        } catch (err) {
+            console.error("Lỗi tra cứu GCN_NH:", err?.message);
+        }
+
+        // Bổ sung: Tra cứu thêm các bảng đơn khác (DonDangKyNhanHieu_KH, TuVanChung_VN, GCN_NH_KH, TuVanChung_KH)
+        try {
+            const donKH = await DonDangKyNhanHieu_KH.findOne({
+                where: { maHoSo: code },
+                include: [
+                    { model: KhachHangCuoi, as: "khachHang", attributes: ["maKhachHang", "maQuocGia"], required: false },
+                    { model: DoiTac, as: "doitac", attributes: ["maDoiTac", "maQuocGia"], required: false },
+                ],
+                order: [["createdAt", "DESC"]],
+            });
+            if (donKH) {
+                return res.status(200).json({
+                    caseCode: code,
+                    customerCode: donKH.khachHang?.maKhachHang || null,
+                    partnerCode: donKH.doitac?.maDoiTac || null,
+                    countryCode: donKH.khachHang?.maQuocGia || donKH.doitac?.maQuocGia || null,
+                });
+            }
+
+            const tvcVn = await TuVanChung_VN.findOne({
+                where: { maHoSo: code },
+                include: [
+                    { model: KhachHangCuoi, as: "KhachHangCuoi", attributes: ["maKhachHang", "maQuocGia"], required: false },
+                    { model: DoiTac, as: "DoiTac", attributes: ["maDoiTac"], required: false },
+                ],
+                order: [["createdAt", "DESC"]],
+            });
+            if (tvcVn) {
+                return res.status(200).json({
+                    caseCode: code,
+                    customerCode: tvcVn.KhachHangCuoi?.maKhachHang || null,
+                    partnerCode: tvcVn.DoiTac?.maDoiTac || null,
+                    countryCode: tvcVn.KhachHangCuoi?.maQuocGia || "VN",
+                });
+            }
+
+            const gcnKh = await GCN_NH_KH.findOne({
+                where: { maHoSo: code },
+                include: [
+                    { model: KhachHangCuoi, as: "KhachHangCuoi", attributes: ["maKhachHang", "maQuocGia"], required: false },
+                    { model: DoiTac, as: "DoiTac", attributes: ["maDoiTac"], required: false },
+                ],
+                order: [["createdAt", "DESC"]],
+            });
+            if (gcnKh) {
+                return res.status(200).json({
+                    caseCode: code,
+                    customerCode: gcnKh.KhachHangCuoi?.maKhachHang || null,
+                    partnerCode: gcnKh.DoiTac?.maDoiTac || null,
+                    countryCode: gcnKh.KhachHangCuoi?.maQuocGia || null,
+                });
+            }
+
+            const tvcKh = await TuVanChung_KH.findOne({
+                where: { maHoSo: code },
+                include: [
+                    { model: KhachHangCuoi, as: "KhachHangCuoi", attributes: ["maKhachHang", "maQuocGia"], required: false },
+                    { model: DoiTac, as: "DoiTac", attributes: ["maDoiTac"], required: false },
+                ],
+                order: [["createdAt", "DESC"]],
+            });
+            if (tvcKh) {
+                return res.status(200).json({
+                    caseCode: code,
+                    customerCode: tvcKh.KhachHangCuoi?.maKhachHang || null,
+                    partnerCode: tvcKh.DoiTac?.maDoiTac || null,
+                    countryCode: tvcKh.KhachHangCuoi?.maQuocGia || null,
+                });
+            }
+        } catch (err) {
+            console.error("Lỗi tra cứu bổ sung bảng đơn:", err?.message);
+        }
+
+        // 5. TimeSheet: caseCode = caseCode (lấy bản ghi gần nhất có đầy đủ customerCode, partnerCode nếu hồ sơ này từng được log time trước đó)
+        try {
+            let tsRecord = await TimeSheet.findOne({
+                where: {
+                    caseCode: code,
+                    customerCode: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] },
+                    partnerCode: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] },
+                },
+                order: [["createdAt", "DESC"]],
+                raw: true,
+            });
+
+            if (!tsRecord) {
+                tsRecord = await TimeSheet.findOne({
+                    where: {
+                        caseCode: code,
+                        [Op.or]: [
+                            { customerCode: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] } },
+                            { partnerCode: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] } },
+                        ],
+                    },
+                    order: [["createdAt", "DESC"]],
+                    raw: true,
+                });
+            }
+
+            if (tsRecord) {
+                return res.status(200).json({
+                    caseCode: code,
+                    customerCode: tsRecord.customerCode || null,
+                    partnerCode: tsRecord.partnerCode || null,
+                    countryCode: tsRecord.countryCode || null,
+                });
+            }
+        } catch (err) {
+            console.error("Lỗi tra cứu TimeSheet:", err?.message);
+        }
+
+        // Không tìm thấy trong bất kỳ nguồn nào
+        return res.status(200).json({
+            caseCode: code,
+            customerCode: null,
+            partnerCode: null,
+            countryCode: null,
+        });
+    } catch (error) {
+        console.error("Lỗi tổng quát getCaseInfo:", error?.message);
+        return res.status(200).json({
+            caseCode: req.body?.caseCode || null,
+            customerCode: null,
+            partnerCode: null,
+            countryCode: null,
+        });
+    }
+};
+
 export const createTimeSheet = async (req, res) => {
     try {
         const {
@@ -187,6 +493,10 @@ export const createTimeSheet = async (req, res) => {
         }
 
         const finalEmployeeCode = employeeCode;
+
+        if (req.body.description && req.body.description.length > 10000) {
+            return res.status(400).json({ message: "Nội dung công việc không được vượt quá 10.000 ký tự" });
+        }
 
         if (!workDate || !activity) {
             return res.status(400).json({
@@ -247,6 +557,10 @@ export const updateTimeSheet = async (req, res) => {
         const currentUserId = req.user?.maNhanSu || req.user?.employeeCode;
         if (!currentUserId || timeSheet.employeeCode !== currentUserId) {
             return res.status(403).json({ message: "Bạn chỉ có quyền chỉnh sửa Time Record của chính mình." });
+        }
+
+        if (req.body.description && req.body.description.length > 10000) {
+            return res.status(400).json({ message: "Nội dung công việc không được vượt quá 10.000 ký tự" });
         }
 
         const employeeCode = currentUserId;

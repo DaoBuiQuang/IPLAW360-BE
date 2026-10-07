@@ -8,6 +8,7 @@ import {
     getTimeSheetsByCase,
     getTimeSheetSummary,
     getCaseCodeOptions,
+    getCaseInfo,
     checkCaseContributions,
     getTimesheetKPI,
     getOfficeSummary,
@@ -38,10 +39,70 @@ const adminAndManagerRoles = ["admin", "manager"];
  *     responses:
  *       200:
  *         description: Lấy danh sách thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       caseCode:
+ *                         type: string
  *       401:
  *         description: Không có quyền truy cập
  */
 router.post("/timesheet/case-options", authenticateUser, getCaseCodeOptions);
+
+/**
+ * @swagger
+ * /timesheet/case-info:
+ *   post:
+ *     summary: Tra cứu chi tiết thông tin hồ sơ theo mã (phục vụ autofill khách hàng, đối tác, quốc gia)
+ *     tags: [TimeSheet]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - caseCode
+ *             properties:
+ *               caseCode:
+ *                 type: string
+ *                 example: "HS20260001"
+ *     responses:
+ *       200:
+ *         description: Lấy thông tin hồ sơ thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 caseCode:
+ *                   type: string
+ *                   example: "HS20260001"
+ *                 customerCode:
+ *                   type: string
+ *                   nullable: true
+ *                   example: "KH001"
+ *                 partnerCode:
+ *                   type: string
+ *                   nullable: true
+ *                   example: "DT001"
+ *                 countryCode:
+ *                   type: string
+ *                   nullable: true
+ *                   example: "VN"
+ *       401:
+ *         description: Không có quyền truy cập
+ */
+router.post("/timesheet/case-info", authenticateUser, getCaseInfo);
 
 /**
  * @swagger
