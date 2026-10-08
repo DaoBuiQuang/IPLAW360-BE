@@ -590,4 +590,8 @@ export {
     TimeSheet,
     DanhSachCongViec,
     NhomNhanSu,
+    GCN_NH,
+    GCN_NH_KH,
+    DonSuaDoiGCN_NH_VN,
+    DonSuaDoiGCN_NH_KH,
 };

@@ -147,13 +147,42 @@ Response:
 
 Trong Timesheet, `caseCode` nhận chính giá trị `maHoSo` được trả về từ API này. `searchText`, `pageIndex` và `pageSize` không bắt buộc; `pageSize` tối đa là `100`.
 
+### 4.2. Tra cứu chi tiết thông tin hồ sơ theo mã (Autofill)
+
+Dùng khi người dùng chọn hoặc nhập `caseCode` trên form Timesheet để tự động điền khách hàng (`customerCode`), đối tác (`partnerCode`) và quốc gia (`countryCode`).
+
+```http
+POST /api/timesheet/case-info
+```
+
+Request body:
+
+```json
+{
+  "caseCode": "HS20260001"
+}
+```
+
+Response:
+
+```json
+{
+  "caseCode": "HS20260001",
+  "customerCode": "KH001",
+  "partnerCode": "DT001",
+  "countryCode": "VN"
+}
+```
+
+*(Lưu ý: Nếu không tìm thấy hồ sơ hoặc trường nào không có dữ liệu, API trả về `null` cho trường đó, không throw lỗi 500).*
+
 Tất cả API cần gửi token đăng nhập:
 
 ```http
 Authorization: Bearer <token>
 ```
 
-### 4.2. Lấy danh sách Timesheet
+### 4.3. Lấy danh sách Timesheet
 
 ```http
 POST /api/timesheet/list
