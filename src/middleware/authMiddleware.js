@@ -39,8 +39,9 @@ export const authenticateUser = async (req, res, next) => {
 };
 export const authorizeRoles = (...allowedRoles) => {
     return (req, res, next) => {
-        const { role } = req.user;
-        if (!allowedRoles.includes(role)) {
+        const userRole = req.user?.role?.toString().toLowerCase().trim();
+        const normalizedAllowed = allowedRoles.map(r => r.toString().toLowerCase().trim());
+        if (!userRole || !normalizedAllowed.includes(userRole)) {
             return res.status(403).json({ message: "Bạn không có quyền truy cập" });
         }
         next();

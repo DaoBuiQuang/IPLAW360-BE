@@ -548,7 +548,8 @@ export const getApplicationById = async (req, res) => {
             });
             if (donTach) plainDon.donTach = donTach.toJSON();
         }
-        res.json(plainDon);
+        plainDon.clientRef = plainDon.clientsRef || null;
+        res.status(200).json(plainDon);
 
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -1408,7 +1409,8 @@ export const getFullApplicationDetail = async (req, res) => {
             plainDon.sdt = plainDon.khachHang.sdt;
         }
 
-        return res.json(plainDon);
+        plainDon.clientRef = plainDon.clientsRef || null;
+        return res.status(200).json(plainDon);
     } catch (error) {
         return res.status(500).json({ message: error.message });
     }

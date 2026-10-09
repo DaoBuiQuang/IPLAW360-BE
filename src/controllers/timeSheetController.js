@@ -1,4 +1,4 @@
-import { Op } from "sequelize";
+﻿import { Op } from "sequelize";
 import { sequelize } from "../config/db.js";
 import { TimeSheet } from "../models/timeSheetModel.js";
 import { NhanSu } from "../models/nhanSuModel.js";
@@ -671,6 +671,71 @@ const resolveEmployeeCodeCondition = async (reqUser, targetEmployee, teamManager
     }
 
     return userCode || null;
+};
+
+/**
+ * Helper: Tra cứu điều kiện lọc customerCode và partnerCode theo cả mã hoặc tên
+ */
+const resolveCustomerPartnerConditions = async (customerInput, partnerInput) => {
+    const conditions = {};
+    if (customerInput && String(customerInput).trim()) {
+        const custTrim = String(customerInput).trim();
+        try {
+            const matchedKh = await KhachHangCuoi.findAll({
+                where: {
+                    [Op.or]: [
+                        { maKhachHang: { [Op.like]: "%" + custTrim + "%" } },
+                        { tenKhachHang: { [Op.like]: "%" + custTrim + "%" } },
+                    ],
+                },
+                attributes: ["maKhachHang"],
+                raw: true,
+            });
+            const foundCodes = [...new Set(matchedKh.map(k => k.maKhachHang).filter(Boolean))];
+            if (foundCodes.length > 0) {
+                conditions.customerCode = {
+                    [Op.or]: [
+                        { [Op.in]: foundCodes },
+                        { [Op.like]: "%" + custTrim + "%" },
+                    ],
+                };
+            } else {
+                conditions.customerCode = { [Op.like]: "%" + custTrim + "%" };
+            }
+        } catch {
+            conditions.customerCode = { [Op.like]: "%" + custTrim + "%" };
+        }
+    }
+
+    if (partnerInput && String(partnerInput).trim()) {
+        const partTrim = String(partnerInput).trim();
+        try {
+            const matchedDt = await DoiTac.findAll({
+                where: {
+                    [Op.or]: [
+                        { maDoiTac: { [Op.like]: "%" + partTrim + "%" } },
+                        { tenDoiTac: { [Op.like]: "%" + partTrim + "%" } },
+                    ],
+                },
+                attributes: ["maDoiTac"],
+                raw: true,
+            });
+            const foundCodes = [...new Set(matchedDt.map(d => d.maDoiTac).filter(Boolean))];
+            if (foundCodes.length > 0) {
+                conditions.partnerCode = {
+                    [Op.or]: [
+                        { [Op.in]: foundCodes },
+                        { [Op.like]: "%" + partTrim + "%" },
+                    ],
+                };
+            } else {
+                conditions.partnerCode = { [Op.like]: "%" + partTrim + "%" };
+            }
+        } catch {
+            conditions.partnerCode = { [Op.like]: "%" + partTrim + "%" };
+        }
+    }
+    return conditions;
 };
 
 export const listTimeSheets = async (req, res) => {
@@ -1357,3 +1422,387 @@ export const getOfficeSummary = async (req, res) => {
         return res.status(500).json({ message: error.message });
     }
 };
+
+// ============================================================
+// MATTER MODULE — view/aggregation over TimeSheets table only
+// ============================================================
+
+/**
+ * POST /timesheet/matter/list
+ */
+export const getMatterList = async (req, res) => {
+    try {
+        const {
+            caseCode,
+            customerCode,
+            partnerCode,
+            fromDate,
+            toDate,
+            employeeCode: reqEmployee,
+            teamManagerCode,
+            pageIndex = 1,
+            pageSize = 20,
+        } = req.body;
+
+        const page = Math.max(Number(pageIndex), 1);
+        const size = Math.min(Math.max(Number(pageSize), 1), 100);
+
+        const empCondition = await resolveEmployeeCodeCondition(req.user, reqEmployee, teamManagerCode);
+        const where = {};
+        if (empCondition) where.employeeCode = empCondition;
+
+        where.caseCode = { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] };
+        if (caseCode) {
+            where.caseCode = {
+                [Op.and]: [
+                    { [Op.ne]: null }, { [Op.ne]: "" },
+                    { [Op.like]: `%${String(caseCode).trim()}%` },
+                ],
+            };
+        }
+        if (customerCode) where.customerCode = customerCode;
+        if (partnerCode) where.partnerCode = partnerCode;
+        if (fromDate || toDate) {
+            where.workDate = {};
+            if (fromDate) where.workDate[Op.gte] = fromDate;
+            if (toDate) where.workDate[Op.lte] = toDate;
+        }
+
+        const rows = await TimeSheet.findAll({
+            where,
+            attributes: [
+                "caseCode", "customerCode", "partnerCode", "countryCode",
+                "employeeCode", "activity", "hours", "contributionPercentage", "workDate",
+            ],
+            raw: true,
+        });
+
+        const matterMap = new Map();
+        for (const row of rows) {
+            const code = row.caseCode;
+            if (!code) continue;
+            if (!matterMap.has(code)) {
+                matterMap.set(code, {
+                    caseCode: code,
+                    customerCode: null,
+                    partnerCode: null,
+                    countryCode: null,
+                    totalHours: 0,
+                    totalContributionPercentage: 0,
+                    activities: new Set(),
+                    employees: new Set(),
+                    latestWorkDate: null,
+                    earliestWorkDate: null,
+                });
+            }
+            const m = matterMap.get(code);
+            if (!m.customerCode && row.customerCode) m.customerCode = row.customerCode;
+            if (!m.partnerCode && row.partnerCode) m.partnerCode = row.partnerCode;
+            if (!m.countryCode && row.countryCode) m.countryCode = row.countryCode;
+            m.totalHours = roundDecimal(m.totalHours + Number(row.hours || 0), 2);
+            m.totalContributionPercentage = roundDecimal(
+                m.totalContributionPercentage + Number(row.contributionPercentage || 0), 2
+            );
+            if (row.activity) m.activities.add(row.activity);
+            if (row.employeeCode) m.employees.add(row.employeeCode);
+            const wd = row.workDate ? String(row.workDate).slice(0, 10) : null;
+            if (wd) {
+                if (!m.latestWorkDate || wd > m.latestWorkDate) m.latestWorkDate = wd;
+                if (!m.earliestWorkDate || wd < m.earliestWorkDate) m.earliestWorkDate = wd;
+            }
+        }
+
+        const matters = Array.from(matterMap.values()).sort((a, b) => {
+            if (a.latestWorkDate && b.latestWorkDate) return b.latestWorkDate.localeCompare(a.latestWorkDate);
+            if (a.latestWorkDate) return -1;
+            if (b.latestWorkDate) return 1;
+            return 0;
+        });
+
+        const totalItems = matters.length;
+        const totalPages = Math.ceil(totalItems / size);
+        const paginated = matters.slice((page - 1) * size, (page - 1) * size + size);
+
+        const custCodes = [...new Set(paginated.map(m => m.customerCode).filter(Boolean))];
+        const partCodes = [...new Set(paginated.map(m => m.partnerCode).filter(Boolean))];
+        const cntryCodes = [...new Set(paginated.map(m => m.countryCode).filter(Boolean))];
+
+        const [customers, partners, countries] = await Promise.all([
+            custCodes.length ? KhachHangCuoi.findAll({ where: { maKhachHang: { [Op.in]: custCodes } }, attributes: ["maKhachHang", "tenKhachHang"], raw: true }) : [],
+            partCodes.length ? DoiTac.findAll({ where: { maDoiTac: { [Op.in]: partCodes } }, attributes: ["maDoiTac", "tenDoiTac"], raw: true }) : [],
+            cntryCodes.length ? QuocGia.findAll({ where: { maQuocGia: { [Op.in]: cntryCodes } }, attributes: ["maQuocGia", "tenQuocGia"], raw: true }) : [],
+        ]);
+
+        const customerMap = new Map(customers.map(c => [c.maKhachHang, c.tenKhachHang]));
+        const partnerMap = new Map(partners.map(p => [p.maDoiTac, p.tenDoiTac]));
+        const countryMap = new Map(countries.map(q => [q.maQuocGia, q.tenQuocGia]));
+
+        const data = paginated.map(m => ({
+            caseCode: m.caseCode,
+            customerCode: m.customerCode,
+            customerName: customerMap.get(m.customerCode) || null,
+            partnerCode: m.partnerCode,
+            partnerName: partnerMap.get(m.partnerCode) || null,
+            countryCode: m.countryCode,
+            countryName: countryMap.get(m.countryCode) || null,
+            totalHours: m.totalHours,
+            totalContributionPercentage: m.totalContributionPercentage,
+            activityCount: m.activities.size,
+            employeeCount: m.employees.size,
+            earliestWorkDate: m.earliestWorkDate,
+            latestWorkDate: m.latestWorkDate,
+        }));
+
+        return res.status(200).json({
+            data,
+            pagination: { totalItems, totalPages, pageIndex: page, pageSize: size },
+        });
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * POST /timesheet/matter/activities
+ */
+export const getMatterActivities = async (req, res) => {
+    try {
+        const { caseCode, fromDate, toDate } = req.body;
+        if (!caseCode) return res.status(400).json({ message: "caseCode la bat buoc" });
+
+        const empCondition = await resolveEmployeeCodeCondition(req.user, null, null);
+        const where = { caseCode };
+        if (empCondition) where.employeeCode = empCondition;
+        if (fromDate || toDate) {
+            where.workDate = {};
+            if (fromDate) where.workDate[Op.gte] = fromDate;
+            if (toDate) where.workDate[Op.lte] = toDate;
+        }
+
+        const rows = await TimeSheet.findAll({
+            where,
+            attributes: ["id", "caseCode", "activity", "employeeCode", "hours", "contributionPercentage", "description", "notes", "workDate"],
+            order: [["workDate", "DESC"], ["id", "DESC"]],
+            raw: true,
+        });
+
+        const allCaseRows = await TimeSheet.findAll({
+            where: { caseCode },
+            attributes: ["activity", "employeeCode"],
+            raw: true,
+        });
+
+        const groupMap = new Map();
+        for (const row of rows) {
+            const key = `${row.activity}|||${row.employeeCode}`;
+            if (!groupMap.has(key)) {
+                groupMap.set(key, {
+                    activity: row.activity,
+                    employeeCode: row.employeeCode,
+                    totalHours: 0,
+                    contributionPercentage: 0,
+                    latestDescription: null,
+                    latestNotes: null,
+                    latestWorkDate: null,
+                    earliestWorkDate: null,
+                    recordCount: 0,
+                    latestRecordId: null,
+                });
+            }
+            const g = groupMap.get(key);
+            g.totalHours = roundDecimal(g.totalHours + Number(row.hours || 0), 2);
+            g.contributionPercentage = roundDecimal(g.contributionPercentage + Number(row.contributionPercentage || 0), 2);
+            g.recordCount += 1;
+            const wd = row.workDate ? String(row.workDate).slice(0, 10) : null;
+            if (wd) {
+                if (!g.latestWorkDate || wd > g.latestWorkDate) {
+                    g.latestWorkDate = wd;
+                    g.latestDescription = row.description || null;
+                    g.latestNotes = row.notes || null;
+                    g.latestRecordId = row.id;
+                }
+                if (!g.earliestWorkDate || wd < g.earliestWorkDate) g.earliestWorkDate = wd;
+            }
+        }
+
+        const colleagueMap = new Map();
+        for (const row of allCaseRows) {
+            if (!row.activity || !row.employeeCode) continue;
+            if (!colleagueMap.has(row.activity)) colleagueMap.set(row.activity, new Set());
+            colleagueMap.get(row.activity).add(row.employeeCode);
+        }
+
+        const allEmpCodes = new Set();
+        for (const g of groupMap.values()) allEmpCodes.add(g.employeeCode);
+        for (const codes of colleagueMap.values()) codes.forEach(c => allEmpCodes.add(c));
+
+        const nhanSuList = allEmpCodes.size > 0
+            ? await NhanSu.findAll({ where: { maNhanSu: { [Op.in]: Array.from(allEmpCodes) } }, attributes: ["maNhanSu", "hoTen"], raw: true })
+            : [];
+        const nameMap = new Map(nhanSuList.map(n => [n.maNhanSu, n.hoTen]));
+
+        const activities = Array.from(groupMap.values()).map(g => {
+            const colleagueCodes = Array.from(colleagueMap.get(g.activity) || []).filter(c => c !== g.employeeCode);
+            return {
+                activity: g.activity,
+                employeeCode: g.employeeCode,
+                employeeName: nameMap.get(g.employeeCode) || null,
+                totalHours: g.totalHours,
+                contributionPercentage: g.contributionPercentage,
+                latestDescription: g.latestDescription,
+                latestNotes: g.latestNotes,
+                latestWorkDate: g.latestWorkDate,
+                earliestWorkDate: g.earliestWorkDate,
+                recordCount: g.recordCount,
+                latestRecordId: g.latestRecordId,
+                colleagues: colleagueCodes.map(code => ({ employeeCode: code, employeeName: nameMap.get(code) || null })),
+            };
+        });
+
+        return res.status(200).json({ caseCode, activities });
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * POST /timesheet/matter/activity-detail
+ */
+export const getMatterActivityDetail = async (req, res) => {
+    try {
+        const { id } = req.body;
+        if (!id) return res.status(400).json({ message: "id la bat buoc" });
+
+        const timeSheet = await TimeSheet.findByPk(id, { raw: true });
+        if (!timeSheet) return res.status(404).json({ message: "Khong tim thay time record" });
+
+        const userRole = String(req.user?.role || "").toLowerCase();
+        const userCode = req.user?.maNhanSu || req.user?.employeeCode;
+
+        if (userRole === "staff" || userRole === "trainee") {
+            if (timeSheet.employeeCode !== userCode) {
+                return res.status(403).json({ message: "Ban chi duoc xem time record cua chinh minh" });
+            }
+        } else if (userRole === "manager") {
+            if (timeSheet.employeeCode !== userCode) {
+                const inTeam = await NhomNhanSu.findOne({ where: { managerCode: userCode, maNhanSu: timeSheet.employeeCode } });
+                if (!inTeam) return res.status(403).json({ message: "Ban khong co quyen xem time record nay" });
+            }
+        }
+
+        const [empList, custList, partList] = await Promise.all([
+            NhanSu.findAll({ where: { maNhanSu: timeSheet.employeeCode }, attributes: ["maNhanSu", "hoTen"], raw: true }),
+            timeSheet.customerCode ? KhachHangCuoi.findAll({ where: { maKhachHang: timeSheet.customerCode }, attributes: ["maKhachHang", "tenKhachHang"], raw: true }) : [],
+            timeSheet.partnerCode ? DoiTac.findAll({ where: { maDoiTac: timeSheet.partnerCode }, attributes: ["maDoiTac", "tenDoiTac"], raw: true }) : [],
+        ]);
+
+        return res.status(200).json({
+            id: timeSheet.id,
+            caseCode: timeSheet.caseCode,
+            activity: timeSheet.activity,
+            description: timeSheet.description,
+            contributionPercentage: Number(timeSheet.contributionPercentage || 0),
+            notes: timeSheet.notes,
+            employeeCode: timeSheet.employeeCode,
+            employeeName: empList[0]?.hoTen || null,
+            workDate: timeSheet.workDate ? String(timeSheet.workDate).slice(0, 10) : null,
+            hours: Number(timeSheet.hours || 0),
+            customerCode: timeSheet.customerCode,
+            customerName: custList[0]?.tenKhachHang || null,
+            partnerCode: timeSheet.partnerCode,
+            partnerName: partList[0]?.tenDoiTac || null,
+            countryCode: timeSheet.countryCode,
+            status: timeSheet.status,
+        });
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * PUT /timesheet/matter/activity-edit
+ * Only owner can edit; only contributionPercentage, description, notes are writable.
+ */
+export const updateMatterActivity = async (req, res) => {
+    try {
+        const { id, contributionPercentage, description, notes } = req.body;
+        if (!id) return res.status(400).json({ message: "id la bat buoc" });
+
+        const timeSheet = await TimeSheet.findByPk(id);
+        if (!timeSheet) return res.status(404).json({ message: "Khong tim thay time record" });
+
+        const userCode = req.user?.maNhanSu || req.user?.employeeCode;
+        if (timeSheet.employeeCode !== userCode) {
+            return res.status(403).json({ message: "Ban chi duoc chinh sua time record cua chinh minh" });
+        }
+
+        if (contributionPercentage !== undefined && contributionPercentage !== null && contributionPercentage !== "") {
+            const parsed = Number(contributionPercentage);
+            if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+                return res.status(400).json({ message: "contributionPercentage phai la so tu 0 den 100" });
+            }
+            timeSheet.contributionPercentage = roundDecimal(parsed, 2);
+        }
+        if (description !== undefined) timeSheet.description = description;
+        if (notes !== undefined) timeSheet.notes = notes;
+
+        await timeSheet.save();
+        return res.status(200).json({ message: "Cap nhat thanh cong", timeSheet: timeSheet.toJSON() });
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * DELETE /timesheet/matter/activity-delete
+ * Deletes the caller's own record by id. Other employees' records are not affected.
+ */
+export const deleteMatterActivity = async (req, res) => {
+    try {
+        const { id } = req.body;
+        if (!id) return res.status(400).json({ message: "id la bat buoc" });
+
+        const timeSheet = await TimeSheet.findByPk(id);
+        if (!timeSheet) return res.status(404).json({ message: "Khong tim thay time record" });
+
+        const userCode = req.user?.maNhanSu || req.user?.employeeCode;
+        if (timeSheet.employeeCode !== userCode) {
+            return res.status(403).json({ message: "Ban chi duoc xoa time record cua chinh minh" });
+        }
+
+        await timeSheet.destroy();
+        return res.status(200).json({ message: "Xoa thanh cong" });
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * POST /timesheet/matter/check-can-edit-matter
+ * canDeleteMatter = true when all records in this caseCode belong to the caller.
+ */
+export const checkMatterCanEdit = async (req, res) => {
+    try {
+        const { caseCode } = req.body;
+        if (!caseCode) return res.status(400).json({ message: "caseCode la bat buoc" });
+
+        const userCode = req.user?.maNhanSu || req.user?.employeeCode;
+
+        const [totalRecords, myRecords] = await Promise.all([
+            TimeSheet.count({ where: { caseCode } }),
+            TimeSheet.count({ where: { caseCode, employeeCode: userCode } }),
+        ]);
+
+        return res.status(200).json({
+            caseCode,
+            totalRecords,
+            myRecords,
+            canDeleteMatter: totalRecords > 0 && totalRecords === myRecords,
+        });
+    } catch (error) {
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+
+
