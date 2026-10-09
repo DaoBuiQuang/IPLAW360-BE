@@ -9,12 +9,7 @@ export const getNhanSuBasicList = async (req, res) => {
         const nhanSuList = await NhanSu.findAll({
             attributes: ["maNhanSu", "hoTen"] 
         });
-
-        if (nhanSuList.length === 0) {
-            return res.status(404).json({ message: "Không có nhân viên nào" });
-        }
-
-        res.status(200).json(nhanSuList);
+        res.status(200).json(nhanSuList || []);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
