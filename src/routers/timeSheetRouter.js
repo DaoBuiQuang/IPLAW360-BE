@@ -12,6 +12,12 @@ import {
     checkCaseContributions,
     getTimesheetKPI,
     getOfficeSummary,
+    getMatterList,
+    getMatterActivities,
+    getMatterActivityDetail,
+    updateMatterActivity,
+    deleteMatterActivity,
+    checkMatterCanEdit,
 } from "../controllers/timeSheetController.js";
 import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.js";
 
@@ -501,5 +507,396 @@ router.post("/timesheet/kpi", authenticateUser, getTimesheetKPI);
  *         description: Chỉ Admin/CEO mới có quyền truy cập
  */
 router.post("/timesheet/office-summary", authenticateUser, authorizeRoles("admin"), getOfficeSummary);
+
+// ============================================================
+// MATTER MODULE routes
+// ============================================================
+
+/**
+ * @swagger
+ * /timesheet/matter/list:
+ *   post:
+ *     summary: Danh sach matter (caseCode) thuoc pham vi quyen cua nguoi dung
+ *     tags: [TimeSheet]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               caseCode:
+ *                 type: string
+ *               customerCode:
+ *                 type: string
+ *               partnerCode:
+ *                 type: string
+ *               fromDate:
+ *                 type: string
+ *                 format: date
+ *               toDate:
+ *                 type: string
+ *                 format: date
+ *               employeeCode:
+ *                 type: string
+ *                 description: "Chi admin/ceo su dung"
+ *               teamManagerCode:
+ *                 type: string
+ *                 description: "Chi admin/ceo su dung"
+ *               pageIndex:
+ *                 type: integer
+ *                 default: 1
+ *               pageSize:
+ *                 type: integer
+ *                 default: 20
+ *     responses:
+ *       200:
+ *         description: Danh sach matter thanh cong
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       caseCode:
+ *                         type: string
+ *                       customerCode:
+ *                         type: string
+ *                         nullable: true
+ *                       customerName:
+ *                         type: string
+ *                         nullable: true
+ *                       partnerCode:
+ *                         type: string
+ *                         nullable: true
+ *                       partnerName:
+ *                         type: string
+ *                         nullable: true
+ *                       countryCode:
+ *                         type: string
+ *                         nullable: true
+ *                       countryName:
+ *                         type: string
+ *                         nullable: true
+ *                       totalHours:
+ *                         type: number
+ *                       totalContributionPercentage:
+ *                         type: number
+ *                       activityCount:
+ *                         type: integer
+ *                       employeeCount:
+ *                         type: integer
+ *                       earliestWorkDate:
+ *                         type: string
+ *                         nullable: true
+ *                       latestWorkDate:
+ *                         type: string
+ *                         nullable: true
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     totalItems:
+ *                       type: integer
+ *                     totalPages:
+ *                       type: integer
+ *                     pageIndex:
+ *                       type: integer
+ *                     pageSize:
+ *                       type: integer
+ *       401:
+ *         description: Khong co quyen truy cap
+ */
+router.post("/timesheet/matter/list", authenticateUser, getMatterList);
+
+/**
+ * @swagger
+ * /timesheet/matter/activities:
+ *   post:
+ *     summary: Danh sach activity trong mot matter, group theo activity + employeeCode
+ *     tags: [TimeSheet]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - caseCode
+ *             properties:
+ *               caseCode:
+ *                 type: string
+ *                 example: "VV001"
+ *               fromDate:
+ *                 type: string
+ *                 format: date
+ *               toDate:
+ *                 type: string
+ *                 format: date
+ *     responses:
+ *       200:
+ *         description: Danh sach activity thanh cong
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 caseCode:
+ *                   type: string
+ *                 activities:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       activity:
+ *                         type: string
+ *                       employeeCode:
+ *                         type: string
+ *                       employeeName:
+ *                         type: string
+ *                         nullable: true
+ *                       totalHours:
+ *                         type: number
+ *                       contributionPercentage:
+ *                         type: number
+ *                       latestDescription:
+ *                         type: string
+ *                         nullable: true
+ *                       latestNotes:
+ *                         type: string
+ *                         nullable: true
+ *                       latestWorkDate:
+ *                         type: string
+ *                         nullable: true
+ *                       earliestWorkDate:
+ *                         type: string
+ *                         nullable: true
+ *                       recordCount:
+ *                         type: integer
+ *                       latestRecordId:
+ *                         type: integer
+ *                         nullable: true
+ *                       colleagues:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             employeeCode:
+ *                               type: string
+ *                             employeeName:
+ *                               type: string
+ *                               nullable: true
+ *       400:
+ *         description: Thieu caseCode
+ *       401:
+ *         description: Khong co quyen truy cap
+ */
+router.post("/timesheet/matter/activities", authenticateUser, getMatterActivities);
+
+/**
+ * @swagger
+ * /timesheet/matter/activity-detail:
+ *   post:
+ *     summary: Chi tiet mot time record (theo id)
+ *     tags: [TimeSheet]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: integer
+ *                 example: 123
+ *     responses:
+ *       200:
+ *         description: Chi tiet time record thanh cong
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                 caseCode:
+ *                   type: string
+ *                   nullable: true
+ *                 activity:
+ *                   type: string
+ *                 description:
+ *                   type: string
+ *                   nullable: true
+ *                 contributionPercentage:
+ *                   type: number
+ *                 notes:
+ *                   type: string
+ *                   nullable: true
+ *                 employeeCode:
+ *                   type: string
+ *                 employeeName:
+ *                   type: string
+ *                   nullable: true
+ *                 workDate:
+ *                   type: string
+ *                   nullable: true
+ *                 hours:
+ *                   type: number
+ *                 customerCode:
+ *                   type: string
+ *                   nullable: true
+ *                 customerName:
+ *                   type: string
+ *                   nullable: true
+ *                 partnerCode:
+ *                   type: string
+ *                   nullable: true
+ *                 partnerName:
+ *                   type: string
+ *                   nullable: true
+ *                 countryCode:
+ *                   type: string
+ *                   nullable: true
+ *                 status:
+ *                   type: string
+ *       401:
+ *         description: Khong co quyen truy cap
+ *       403:
+ *         description: Khong co quyen xem time record nay
+ *       404:
+ *         description: Khong tim thay time record
+ */
+router.post("/timesheet/matter/activity-detail", authenticateUser, getMatterActivityDetail);
+
+/**
+ * @swagger
+ * /timesheet/matter/activity-edit:
+ *   put:
+ *     summary: Sua contributionPercentage, description, notes cua time record (chi chu so huu)
+ *     tags: [TimeSheet]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: integer
+ *                 example: 123
+ *               contributionPercentage:
+ *                 type: number
+ *                 minimum: 0
+ *                 maximum: 100
+ *               description:
+ *                 type: string
+ *               notes:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Cap nhat thanh cong
+ *       400:
+ *         description: Du lieu khong hop le
+ *       401:
+ *         description: Khong co quyen truy cap
+ *       403:
+ *         description: Chi duoc sua time record cua chinh minh
+ *       404:
+ *         description: Khong tim thay time record
+ */
+router.put("/timesheet/matter/activity-edit", authenticateUser, updateMatterActivity);
+
+/**
+ * @swagger
+ * /timesheet/matter/activity-delete:
+ *   delete:
+ *     summary: Xoa time record cua chinh nguoi dung (theo id)
+ *     tags: [TimeSheet]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: integer
+ *                 example: 123
+ *     responses:
+ *       200:
+ *         description: Xoa thanh cong
+ *       401:
+ *         description: Khong co quyen truy cap
+ *       403:
+ *         description: Chi duoc xoa time record cua chinh minh
+ *       404:
+ *         description: Khong tim thay time record
+ */
+router.delete("/timesheet/matter/activity-delete", authenticateUser, deleteMatterActivity);
+
+/**
+ * @swagger
+ * /timesheet/matter/check-can-edit-matter:
+ *   post:
+ *     summary: Kiem tra xem matter co the xoa toan bo khong (canDeleteMatter)
+ *     tags: [TimeSheet]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - caseCode
+ *             properties:
+ *               caseCode:
+ *                 type: string
+ *                 example: "VV001"
+ *     responses:
+ *       200:
+ *         description: Ket qua kiem tra
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 caseCode:
+ *                   type: string
+ *                 totalRecords:
+ *                   type: integer
+ *                   description: Tong so time record trong caseCode nay (tat ca nhan vien)
+ *                 myRecords:
+ *                   type: integer
+ *                   description: So time record cua nguoi dung hien tai trong caseCode nay
+ *                 canDeleteMatter:
+ *                   type: boolean
+ *                   description: true neu tat ca record trong case nay thuoc ve nguoi dung hien tai
+ *       400:
+ *         description: Thieu caseCode
+ *       401:
+ *         description: Khong co quyen truy cap
+ */
+router.post("/timesheet/matter/check-can-edit-matter", authenticateUser, checkMatterCanEdit);
 
 export default router;
