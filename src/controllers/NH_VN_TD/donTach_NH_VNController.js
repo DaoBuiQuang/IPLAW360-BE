@@ -123,11 +123,11 @@ export const tachDonDangKy_VN = async (req, res) => {
                     maDonDangKy: maDonDangKyMoi,
                     maDonDangKyGoc: maDonDangKyCu,
                     dsNhomSPDV: item.nhomSPDV,
-                    ndTachDon: null,
-                    moTa: null,
+                    ndTachDon: item.ndTachDon || null,
+                    moTa: item.moTa || null,
                     ngayYeuCau: item.ngayYeuCau,
-                    ngayGhiNhanSuaDoi: item.ngayGhiNhanSuaDoi,
-                    lanTachDon: i + 1,
+                    ngayGhiNhanTachDon: item.ngayGhiNhanTachDon || item.ngayGhiNhanSuaDoi || null,
+                    lanTachDon: item.lanTachDon || (i + 1),
                     maNhanSuCapNhap: req.user?.maNhanSu || null,
                 },
                 { transaction }
@@ -207,18 +207,18 @@ export const tachDonDangKy_KH = async (req, res) => {
                 { transaction }
             );
 
-            // ====== 3) TẠO BẢN GHI DonTachNH_VN ======
+            // ====== 3) TẠO BẢN GHI DonTachNH_KH ======
             await DonTachNH_KH.create(
                 {
                     soDon: item.soDon,
                     maDonDangKy: maDonDangKyMoi,
                     maDonDangKyGoc: maDonDangKyCu,
                     dsNhomSPDV: item.nhomSPDV,
-                    ndTachDon: null,
-                    moTa: null,
+                    ndTachDon: item.ndTachDon || null,
+                    moTa: item.moTa || null,
                     ngayYeuCau: item.ngayYeuCau,
-                    ngayGhiNhanSuaDoi: item.ngayGhiNhanSuaDoi,
-                    lanTachDon: i + 1,
+                    ngayGhiNhanTachDon: item.ngayGhiNhanTachDon || item.ngayGhiNhanSuaDoi || null,
+                    lanTachDon: item.lanTachDon || (i + 1),
                     maNhanSuCapNhap: req.user?.maNhanSu || null,
                 },
                 { transaction }
