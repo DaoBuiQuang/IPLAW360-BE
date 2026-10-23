@@ -1,4 +1,4 @@
-﻿import { Op } from "sequelize";
+import { Op, QueryTypes } from "sequelize";
 import { sequelize } from "../config/db.js";
 import { TimeSheet } from "../models/timeSheetModel.js";
 import { NhanSu } from "../models/nhanSuModel.js";
@@ -1444,118 +1444,126 @@ export const getMatterList = async (req, res) => {
             pageSize = 20,
         } = req.body;
 
-        const page = Math.max(Number(pageIndex), 1);
-        const size = Math.min(Math.max(Number(pageSize), 1), 100);
+        const page = Math.max(Number(pageIndex) || 1, 1);
+        const size = Math.min(Math.max(Number(pageSize) || 20, 1), 100);
+        const offset = (page - 1) * size;
 
         const empCondition = await resolveEmployeeCodeCondition(req.user, reqEmployee, teamManagerCode);
-        const where = {};
-        if (empCondition) where.employeeCode = empCondition;
 
-        where.caseCode = { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] };
-        if (caseCode) {
-            where.caseCode = {
-                [Op.and]: [
-                    { [Op.ne]: null }, { [Op.ne]: "" },
-                    { [Op.like]: `%${String(caseCode).trim()}%` },
-                ],
-            };
-        }
-        if (customerCode) where.customerCode = customerCode;
-        if (partnerCode) where.partnerCode = partnerCode;
-        if (fromDate || toDate) {
-            where.workDate = {};
-            if (fromDate) where.workDate[Op.gte] = fromDate;
-            if (toDate) where.workDate[Op.lte] = toDate;
-        }
+        let filterSql = "";
+        const replacements = {
+            limit: size,
+            offset,
+        };
 
-        const rows = await TimeSheet.findAll({
-            where,
-            attributes: [
-                "caseCode", "customerCode", "partnerCode", "countryCode",
-                "employeeCode", "activity", "hours", "contributionPercentage", "workDate",
-            ],
-            raw: true,
-        });
-
-        const matterMap = new Map();
-        for (const row of rows) {
-            const code = row.caseCode;
-            if (!code) continue;
-            if (!matterMap.has(code)) {
-                matterMap.set(code, {
-                    caseCode: code,
-                    customerCode: null,
-                    partnerCode: null,
-                    countryCode: null,
-                    totalHours: 0,
-                    totalContributionPercentage: 0,
-                    activities: new Set(),
-                    employees: new Set(),
-                    latestWorkDate: null,
-                    earliestWorkDate: null,
-                });
-            }
-            const m = matterMap.get(code);
-            if (!m.customerCode && row.customerCode) m.customerCode = row.customerCode;
-            if (!m.partnerCode && row.partnerCode) m.partnerCode = row.partnerCode;
-            if (!m.countryCode && row.countryCode) m.countryCode = row.countryCode;
-            m.totalHours = roundDecimal(m.totalHours + Number(row.hours || 0), 2);
-            m.totalContributionPercentage = roundDecimal(
-                m.totalContributionPercentage + Number(row.contributionPercentage || 0), 2
-            );
-            if (row.activity) m.activities.add(row.activity);
-            if (row.employeeCode) m.employees.add(row.employeeCode);
-            const wd = row.workDate ? String(row.workDate).slice(0, 10) : null;
-            if (wd) {
-                if (!m.latestWorkDate || wd > m.latestWorkDate) m.latestWorkDate = wd;
-                if (!m.earliestWorkDate || wd < m.earliestWorkDate) m.earliestWorkDate = wd;
+        if (empCondition) {
+            if (typeof empCondition === "string") {
+                filterSql += " AND ts.employeeCode = :empCode";
+                replacements.empCode = empCondition;
+            } else if (typeof empCondition === "object") {
+                const codes = Array.isArray(empCondition)
+                    ? empCondition
+                    : (empCondition[Op.in] || []);
+                if (codes.length > 0) {
+                    filterSql += " AND ts.employeeCode IN (:empCodes)";
+                    replacements.empCodes = codes;
+                } else {
+                    filterSql += " AND 1 = 0";
+                }
             }
         }
 
-        const matters = Array.from(matterMap.values()).sort((a, b) => {
-            if (a.latestWorkDate && b.latestWorkDate) return b.latestWorkDate.localeCompare(a.latestWorkDate);
-            if (a.latestWorkDate) return -1;
-            if (b.latestWorkDate) return 1;
-            return 0;
-        });
+        const targetCaseCode = caseCode || req.body?.maVuViec;
+        if (targetCaseCode && String(targetCaseCode).trim()) {
+            filterSql += " AND ts.caseCode LIKE :caseCodePattern";
+            replacements.caseCodePattern = `%${String(targetCaseCode).trim()}%`;
+        }
 
-        const totalItems = matters.length;
-        const totalPages = Math.ceil(totalItems / size);
-        const paginated = matters.slice((page - 1) * size, (page - 1) * size + size);
+        if (customerCode && String(customerCode).trim()) {
+            filterSql += " AND ts.customerCode = :customerCode";
+            replacements.customerCode = String(customerCode).trim();
+        }
 
-        const custCodes = [...new Set(paginated.map(m => m.customerCode).filter(Boolean))];
-        const partCodes = [...new Set(paginated.map(m => m.partnerCode).filter(Boolean))];
-        const cntryCodes = [...new Set(paginated.map(m => m.countryCode).filter(Boolean))];
+        if (partnerCode && String(partnerCode).trim()) {
+            filterSql += " AND ts.partnerCode = :partnerCode";
+            replacements.partnerCode = String(partnerCode).trim();
+        }
 
-        const [customers, partners, countries] = await Promise.all([
-            custCodes.length ? KhachHangCuoi.findAll({ where: { maKhachHang: { [Op.in]: custCodes } }, attributes: ["maKhachHang", "tenKhachHang"], raw: true }) : [],
-            partCodes.length ? DoiTac.findAll({ where: { maDoiTac: { [Op.in]: partCodes } }, attributes: ["maDoiTac", "tenDoiTac"], raw: true }) : [],
-            cntryCodes.length ? QuocGia.findAll({ where: { maQuocGia: { [Op.in]: cntryCodes } }, attributes: ["maQuocGia", "tenQuocGia"], raw: true }) : [],
+        if (fromDate && String(fromDate).trim()) {
+            filterSql += " AND ts.workDate >= :fromDate";
+            replacements.fromDate = String(fromDate).trim();
+        }
+
+        if (toDate && String(toDate).trim()) {
+            filterSql += " AND ts.workDate <= :toDate";
+            replacements.toDate = String(toDate).trim();
+        }
+
+        const countSql = `
+            SELECT COUNT(DISTINCT ts.caseCode) AS totalItems
+            FROM timesheets ts
+            WHERE ts.caseCode IS NOT NULL AND ts.caseCode != ''
+            ${filterSql}
+        `;
+
+        const dataSql = `
+            SELECT 
+                ts.caseCode,
+                MAX(ts.customerCode) AS customerCode,
+                MAX(kh.tenKhachHang) AS customerName,
+                MAX(ts.partnerCode) AS partnerCode,
+                MAX(dt.tenDoiTac) AS partnerName,
+                MAX(ts.countryCode) AS countryCode,
+                MAX(qg.tenQuocGia) AS countryName,
+                ROUND(COALESCE(SUM(ts.hours), 0), 2) AS totalHours,
+                ROUND(COALESCE(SUM(ts.contributionPercentage), 0), 2) AS totalContributionPercentage,
+                COUNT(DISTINCT ts.activity) AS activityCount,
+                COUNT(DISTINCT ts.employeeCode) AS employeeCount,
+                MIN(ts.workDate) AS earliestWorkDate,
+                MAX(ts.workDate) AS latestWorkDate
+            FROM timesheets ts
+            LEFT JOIN khachhangcuoi kh ON ts.customerCode = kh.maKhachHang
+            LEFT JOIN doitac dt ON ts.partnerCode = dt.maDoiTac
+            LEFT JOIN quocgia qg ON ts.countryCode = qg.maQuocGia
+            WHERE ts.caseCode IS NOT NULL AND ts.caseCode != ''
+            ${filterSql}
+            GROUP BY ts.caseCode
+            ORDER BY latestWorkDate DESC
+            LIMIT :limit OFFSET :offset
+        `;
+
+        const [countResult, rows] = await Promise.all([
+            sequelize.query(countSql, { replacements, type: QueryTypes.SELECT }),
+            sequelize.query(dataSql, { replacements, type: QueryTypes.SELECT }),
         ]);
 
-        const customerMap = new Map(customers.map(c => [c.maKhachHang, c.tenKhachHang]));
-        const partnerMap = new Map(partners.map(p => [p.maDoiTac, p.tenDoiTac]));
-        const countryMap = new Map(countries.map(q => [q.maQuocGia, q.tenQuocGia]));
+        const totalItems = Number(countResult[0]?.totalItems || 0);
+        const totalPages = Math.ceil(totalItems / size);
 
-        const data = paginated.map(m => ({
+        const data = rows.map((m) => ({
             caseCode: m.caseCode,
-            customerCode: m.customerCode,
-            customerName: customerMap.get(m.customerCode) || null,
-            partnerCode: m.partnerCode,
-            partnerName: partnerMap.get(m.partnerCode) || null,
-            countryCode: m.countryCode,
-            countryName: countryMap.get(m.countryCode) || null,
-            totalHours: m.totalHours,
-            totalContributionPercentage: m.totalContributionPercentage,
-            activityCount: m.activities.size,
-            employeeCount: m.employees.size,
-            earliestWorkDate: m.earliestWorkDate,
-            latestWorkDate: m.latestWorkDate,
+            customerCode: m.customerCode || null,
+            customerName: m.customerName || null,
+            partnerCode: m.partnerCode || null,
+            partnerName: m.partnerName || null,
+            countryCode: m.countryCode || null,
+            countryName: m.countryName || null,
+            totalHours: Number(m.totalHours) || 0,
+            totalContributionPercentage: Number(m.totalContributionPercentage) || 0,
+            activityCount: Number(m.activityCount) || 0,
+            employeeCount: Number(m.employeeCount) || 0,
+            earliestWorkDate: m.earliestWorkDate ? String(m.earliestWorkDate).slice(0, 10) : null,
+            latestWorkDate: m.latestWorkDate ? String(m.latestWorkDate).slice(0, 10) : null,
         }));
 
         return res.status(200).json({
             data,
-            pagination: { totalItems, totalPages, pageIndex: page, pageSize: size },
+            pagination: {
+                totalItems,
+                totalPages,
+                pageIndex: page,
+                pageSize: size,
+            },
         });
     } catch (error) {
         return res.status(500).json({ message: error.message });
