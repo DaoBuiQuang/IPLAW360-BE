@@ -1,31 +1,76 @@
 import { Op, Sequelize } from "sequelize";
 import { NhanHieu } from "../models/nhanHieuModel.js";
-// Lấy tất cả nhãn hiệu (có tìm kiếm)
+// Lấy danh sách nhãn hiệu (hỗ trợ phân trang & tìm kiếm tối ưu)
 export const getAllNhanHieu = async (req, res) => {
     try {
-        const { search, searchText, tenNhanHieu } = req.body || {};
-        const query = String(search || searchText || tenNhanHieu || "").trim();
+        const { search, searchText, tenNhanHieu, pageIndex, pageSize, sortBy, sortOrder } = req.body || {};
+        const query = String(search ?? searchText ?? tenNhanHieu ?? "").trim();
+        const page = Math.max(1, parseInt(pageIndex, 10) || 1);
+        const size = Math.max(1, parseInt(pageSize, 10) || 10);
+        const offset = (page - 1) * size;
+
         const where = {};
 
         if (query) {
+            const orConditions = [
+                { tenNhanHieu: { [Op.like]: `%${query}%` } },
+                Sequelize.where(
+                    Sequelize.cast(Sequelize.col("maNhanHieu"), "CHAR"),
+                    { [Op.like]: `%${query}%` }
+                ),
+            ];
+
+            // Nếu từ khóa tìm kiếm là số, bổ sung tìm kiếm theo mã nhãn hiệu chính xác để tối ưu index
+            if (/^\d+$/.test(query)) {
+                orConditions.push({ maNhanHieu: parseInt(query, 10) });
+            }
+
+            // Hỗ trợ tìm kiếm theo nhiều từ khóa (tokens) cho tên nhãn hiệu
             const tokens = query.split(/\s+/).filter(Boolean);
-            if (tokens.length === 1) {
-                where.tenNhanHieu = { [Op.like]: `%${tokens[0]}%` };
-            } else if (tokens.length > 1) {
-                where[Op.and] = tokens.map(tok => ({
-                    tenNhanHieu: { [Op.like]: `%${tok}%` }
-                }));
+            if (tokens.length > 1) {
+                orConditions.push({
+                    [Op.and]: tokens.map((tok) => ({
+                        tenNhanHieu: { [Op.like]: `%${tok}%` },
+                    })),
+                });
+            }
+
+            where[Op.or] = orConditions;
+        }
+
+        // Tùy biến sắp xếp nếu có sortBy, mặc định sắp xếp theo maNhanHieu DESC (nhãn hiệu mới nhất lên đầu)
+        let order = [["maNhanHieu", "DESC"]];
+        if (sortBy) {
+            const allowedSortFields = ["maNhanHieu", "tenNhanHieu", "createdAt", "updatedAt"];
+            if (allowedSortFields.includes(sortBy)) {
+                const direction = String(sortOrder || "ASC").toUpperCase() === "DESC" ? "DESC" : "ASC";
+                order = [[sortBy, direction]];
             }
         }
 
-        const nhanHieus = await NhanHieu.findAll({
+        const { count: totalItems, rows } = await NhanHieu.findAndCountAll({
             where,
-            order: [["tenNhanHieu", "ASC"]],
+            attributes: ["maNhanHieu", "tenNhanHieu", "linkAnh", "moTa", "isAutoImport", "createdAt", "updatedAt"],
+            order,
+            limit: size,
+            offset,
         });
 
-        res.status(200).json(nhanHieus);
+        return res.status(200).json({
+            data: rows,
+            pagination: {
+                pageIndex: page,
+                pageSize: size,
+                totalItems,
+                totalPages: Math.ceil(totalItems / size),
+            },
+        });
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error("Lỗi khi lấy danh sách nhãn hiệu /brand/list:", error);
+        return res.status(500).json({
+            message: "Lỗi máy chủ khi lấy danh sách nhãn hiệu",
+            error: error.message,
+        });
     }
 };
 

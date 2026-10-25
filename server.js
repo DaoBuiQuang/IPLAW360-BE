@@ -38,6 +38,7 @@ import donTachRouter from "./src/routers/donTachRouter.js"
 import timeSheetRouter from "./src/routers/timeSheetRouter.js"
 import dsCongViecRouter from "./src/routers/dsCongViecRouter.js"
 import nhomNhanSuRouter from "./src/routers/nhomNhanSuRouter.js"
+import donCQSH_NhanHieu_VNRouter from "./src/routers/donCQSH_NhanHieu_VNRouter.js"
 // import nganhNgheRouter from "./src/routers/nganhNgheRouter.js"
 import { connectDB } from "./src/config/db.js";
 import { syncDatabase } from "./src/models/index.js";
@@ -107,6 +108,7 @@ app.use("/api", donTachRouter);
 app.use("/api", timeSheetRouter);
 app.use("/api", dsCongViecRouter);
 app.use("/api", nhomNhanSuRouter);
+app.use("/api", donCQSH_NhanHieu_VNRouter);
 connectDB();
 syncDatabase();
 const PORT = process.env.PORT || 3000;

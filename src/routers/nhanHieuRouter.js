@@ -8,7 +8,7 @@ const router = express.Router();
  * @swagger
  * /brand/list:
  *   post:
- *     summary: Lấy danh sách nhãn hiệu (đầy đủ)
+ *     summary: Lấy danh sách nhãn hiệu (hỗ trợ phân trang và tìm kiếm tối ưu)
  *     tags: [Brand]
  *     security:
  *       - bearerAuth: []
@@ -19,21 +19,63 @@ const router = express.Router();
  *           schema:
  *             type: object
  *             properties:
- *               searchText:
+ *               search:
  *                 type: string
+ *                 description: Tên hoặc mã nhãn hiệu cần tìm
+ *                 example: "1734"
  *               pageIndex:
  *                 type: integer
  *                 default: 1
+ *                 description: Số thứ tự trang (bắt đầu từ 1)
  *               pageSize:
  *                 type: integer
- *                 default: 20
+ *                 default: 10
+ *                 description: Số lượng bản ghi trên một trang
  *     responses:
  *       200:
- *         description: Lấy danh sách thành công
+ *         description: Lấy danh sách nhãn hiệu thành công
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       maNhanHieu:
+ *                         type: integer
+ *                         example: 1734
+ *                       tenNhanHieu:
+ *                         type: string
+ *                         example: "Logo Đức Ngọc CERAMIC..."
+ *                       linkAnh:
+ *                         type: string
+ *                         example: "data:image/png;base64,..."
+ *                       moTa:
+ *                         type: string
+ *                 pagination:
+ *                   type: object
+ *                   properties:
+ *                     pageIndex:
+ *                       type: integer
+ *                       example: 1
+ *                     pageSize:
+ *                       type: integer
+ *                       example: 10
+ *                     totalItems:
+ *                       type: integer
+ *                       example: 1500
+ *                     totalPages:
+ *                       type: integer
+ *                       example: 150
  *       401:
  *         description: Không có quyền truy cập
+ *       500:
+ *         description: Lỗi máy chủ nội bộ
  */
-router.post("/brand/list",authenticateUser, getAllNhanHieu);
+router.post("/brand/list", authenticateUser, getAllNhanHieu);
 
 /**
  * @swagger

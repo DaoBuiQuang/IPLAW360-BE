@@ -123,11 +123,11 @@ export const tachDonDangKy_VN = async (req, res) => {
                     maDonDangKy: maDonDangKyMoi,
                     maDonDangKyGoc: maDonDangKyCu,
                     dsNhomSPDV: item.nhomSPDV,
-                    ndTachDon: null,
-                    moTa: null,
+                    ndTachDon: item.ndTachDon || null,
+                    moTa: item.moTa || null,
                     ngayYeuCau: item.ngayYeuCau,
-                    ngayGhiNhanSuaDoi: item.ngayGhiNhanSuaDoi,
-                    lanTachDon: i + 1,
+                    ngayGhiNhanTachDon: item.ngayGhiNhanTachDon || item.ngayGhiNhanSuaDoi || null,
+                    lanTachDon: item.lanTachDon || (i + 1),
                     maNhanSuCapNhap: req.user?.maNhanSu || null,
                 },
                 { transaction }
@@ -207,18 +207,18 @@ export const tachDonDangKy_KH = async (req, res) => {
                 { transaction }
             );
 
-            // ====== 3) TẠO BẢN GHI DonTachNH_VN ======
+            // ====== 3) TẠO BẢN GHI DonTachNH_KH ======
             await DonTachNH_KH.create(
                 {
                     soDon: item.soDon,
                     maDonDangKy: maDonDangKyMoi,
                     maDonDangKyGoc: maDonDangKyCu,
                     dsNhomSPDV: item.nhomSPDV,
-                    ndTachDon: null,
-                    moTa: null,
+                    ndTachDon: item.ndTachDon || null,
+                    moTa: item.moTa || null,
                     ngayYeuCau: item.ngayYeuCau,
-                    ngayGhiNhanSuaDoi: item.ngayGhiNhanSuaDoi,
-                    lanTachDon: i + 1,
+                    ngayGhiNhanTachDon: item.ngayGhiNhanTachDon || item.ngayGhiNhanSuaDoi || null,
+                    lanTachDon: item.lanTachDon || (i + 1),
                     maNhanSuCapNhap: req.user?.maNhanSu || null,
                 },
                 { transaction }
@@ -528,23 +528,14 @@ export const getAllApplicationTD_VN = async (req, res) => {
             linkAnh: (app) => app.nhanHieu?.linkAnh || null,
             donGoc: (app) => app.donGoc,
 
-            // ====== Các field lấy từ DonSuaDoi_NH_VN (donSuaDoi) ======
-            soDonSD: (app) => app.donSuaDoi?.soDonSD || null,
-            ngayYeuCau: (app) => app.donSuaDoi?.ngayYeuCau || null,
-            lanSuaDoi: (app) => app.donSuaDoi?.lanSuaDoi || null,
-            ngayGhiNhanSuaDoi: (app) => app.donSuaDoi?.ngayGhiNhanSuaDoi || null,
-            duocGhiNhanSuaDoi: (app) => app.donSuaDoi?.duocGhiNhanSuaDoi || null,
-            moTaSuaDoi: (app) => app.donSuaDoi?.moTaSuaDoi || null,
-            suaDoiDaiDien: (app) => app.donSuaDoi?.suaDoiDaiDien || null,
-            ndSuaDoiDaiDien: (app) => app.donSuaDoi?.ndSuaDoiDaiDien || null,
-            suaDoiTenChuDon: (app) => app.donSuaDoi?.suaDoiTenChuDon || null,
-            ndSuaDoiTenChuDon: (app) => app.donSuaDoi?.ndSuaDoiTenChuDon || null,
-            suaDoiDiaChi: (app) => app.donSuaDoi?.suaDoiDiaChi || null,
-            ndSuaDoiDiaChi: (app) => app.donSuaDoi?.ndSuaDoiDiaChi || null,
-            suaNhan: (app) => app.donSuaDoi?.suaNhan || null,
-            ndSuaNhan: (app) => app.donSuaDoi?.ndSuaNhan || null,
-            suaNhomSPDV: (app) => app.donSuaDoi?.suaNhomSPDV || null,
-            ndSuaNhomSPDV: (app) => app.donSuaDoi?.ndSuaNhomSPDV || null,
+            // ====== Các field lấy từ DonTachNH_VN (donTach) ======
+            ngayYeuCau: (app) => app.donTach?.ngayYeuCau || null,
+            lanTachDon: (app) => app.donTach?.lanTachDon || null,
+            lanSuaDoi: (app) => app.donTach?.lanTachDon || null,
+            ngayGhiNhanTachDon: (app) => app.donTach?.ngayGhiNhanTachDon || null,
+            ngayGhiNhanSuaDoi: (app) => app.donTach?.ngayGhiNhanTachDon || null,
+            ndTachDon: (app) => app.donTach?.ndTachDon || null,
+            moTa: (app) => app.donTach?.moTa || null,
         };
 
         const result = applications.map((app) => {
@@ -752,15 +743,18 @@ export const getAllApplicationTD_KH = async (req, res) => {
                         ? { tenDoiTac: { [Op.like]: `%${partnerName}%` } }
                         : undefined,
                 },
-                // 🔽 include thêm thông tin ĐƠN SỬA ĐỔI KH
+                // 🔽 include thêm thông tin ĐƠN TÁCH KH
                 {
                     model: DonTachNH_KH,
                     as: "donTach_KH",     // phải khớp alias với hasOne
                     required: false,
                     attributes: [
+                        "soDon",
                         "ngayYeuCau",
                         "lanTachDon",
                         "ngayGhiNhanTachDon",
+                        "ndTachDon",
+                        "moTa",
                     ],
                 },
             ],
@@ -814,24 +808,14 @@ export const getAllApplicationTD_KH = async (req, res) => {
             linkAnh: (app) => app.nhanHieu?.linkAnh || null,
             donGoc: (app) => app.donGoc,
 
-            // 🔽 Các field lấy từ DonSuaDoi_NH_KH
-            soDonSD: (app) => app.donSuaDoi_KH?.soDonSD || null,
-            ngayYeuCau: (app) => app.donSuaDoi_KH?.ngayYeuCau || null,
-            lanSuaDoi: (app) => app.donSuaDoi_KH?.lanSuaDoi || null,
-            ngayGhiNhanSuaDoi: (app) => app.donSuaDoi_KH?.ngayGhiNhanSuaDoi || null,
-            duocGhiNhanSuaDoi: (app) => app.donSuaDoi_KH?.duocGhiNhanSuaDoi || null,
-            moTaSuaDoi: (app) => app.donSuaDoi_KH?.moTaSuaDoi || null,
-            suaDoiDaiDien: (app) => app.donSuaDoi_KH?.suaDoiDaiDien || null,
-            ndSuaDoiDaiDien: (app) => app.donSuaDoi_KH?.ndSuaDoiDaiDien || null,
-            suaDoiTenChuDon: (app) => app.donSuaDoi_KH?.suaDoiTenChuDon || null,
-            ndSuaDoiTenChuDon: (app) =>
-                app.donSuaDoi_KH?.ndSuaDoiTenChuDon || null,
-            suaDoiDiaChi: (app) => app.donSuaDoi_KH?.suaDoiDiaChi || null,
-            ndSuaDoiDiaChi: (app) => app.donSuaDoi_KH?.ndSuaDoiDiaChi || null,
-            suaNhan: (app) => app.donSuaDoi_KH?.suaNhan || null,
-            ndSuaNhan: (app) => app.donSuaDoi_KH?.ndSuaNhan || null,
-            suaNhomSPDV: (app) => app.donSuaDoi_KH?.suaNhomSPDV || null,
-            ndSuaNhomSPDV: (app) => app.donSuaDoi_KH?.ndSuaNhomSPDV || null,
+            // 🔽 Các field lấy từ DonTachNH_KH (donTach_KH)
+            ngayYeuCau: (app) => app.donTach_KH?.ngayYeuCau || null,
+            lanTachDon: (app) => app.donTach_KH?.lanTachDon || null,
+            lanSuaDoi: (app) => app.donTach_KH?.lanTachDon || null,
+            ngayGhiNhanTachDon: (app) => app.donTach_KH?.ngayGhiNhanTachDon || null,
+            ngayGhiNhanSuaDoi: (app) => app.donTach_KH?.ngayGhiNhanTachDon || null,
+            ndTachDon: (app) => app.donTach_KH?.ndTachDon || null,
+            moTa: (app) => app.donTach_KH?.moTa || null,
         };
 
         const result = applications.map((app) => {

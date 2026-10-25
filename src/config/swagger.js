@@ -32,6 +32,7 @@ const options = {
       { name: 'Application SD VN', description: 'Đơn sửa đổi nhãn hiệu Việt Nam' },
       { name: 'Application SD KH', description: 'Đơn sửa đổi nhãn hiệu Khách hàng' },
       { name: 'Application SD GCN VN', description: 'Đơn sửa đổi GCN nhãn hiệu Việt Nam' },
+      { name: 'Application CQSH VN', description: 'Đơn chuyển quyền sở hữu nhãn hiệu và GCN Việt Nam' },
       { name: 'Application Tách Đơn', description: 'Đơn tách nhãn hiệu Việt Nam & Khách hàng' },
       { name: 'GCN Nhãn hiệu', description: 'Giấy chứng nhận nhãn hiệu' },
       { name: 'Văn bằng', description: 'Quản lý văn bằng bảo hộ' },

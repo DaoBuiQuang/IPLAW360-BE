@@ -54,6 +54,7 @@ const router = express.Router();
  *                     properties:
  *                       managerCode: { type: string }
  *                       managerName: { type: string }
+ *                       tenNhom: { type: string, nullable: true }
  *                       members:
  *                         type: array
  */

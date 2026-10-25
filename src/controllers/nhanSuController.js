@@ -274,8 +274,11 @@ export const getMyTeam = async (req, res) => {
             };
         });
 
+        const tenNhom = nhomRecords.find((r) => r.tenNhom)?.tenNhom || null;
+
         return res.status(200).json({
             success: true,
+            tenNhom,
             manager: managerInfo,
             members,
         });
