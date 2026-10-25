@@ -107,7 +107,8 @@ const buildTeamResponse = async (managerCode) => {
         };
     });
 
-    return { manager: managerInfo, members };
+    const tenNhom = records.find((r) => r.tenNhom)?.tenNhom || null;
+    return { manager: managerInfo, members, tenNhom };
 };
 
 // ============================================================
@@ -160,8 +161,11 @@ export const listAllTeams = async (req, res) => {
                     managerCode: mgCode,
                     managerName: rec.manager?.hoTen || mgCode,
                     managerChucVu: rec.manager?.chucVu || null,
+                    tenNhom: rec.tenNhom || null,
                     members: [],
                 };
+            } else if (!teamMap[mgCode].tenNhom && rec.tenNhom) {
+                teamMap[mgCode].tenNhom = rec.tenNhom;
             }
             if (rec.thanhVien) {
                 teamMap[mgCode].members.push({
@@ -212,11 +216,12 @@ export const getTeamDetail = async (req, res) => {
             return res.status(400).json({ message: "Thiếu mã trưởng nhóm (managerCode)" });
         }
 
-        const { manager, members } = await buildTeamResponse(managerCode);
+        const { manager, members, tenNhom } = await buildTeamResponse(managerCode);
 
         return res.status(200).json({
             success: true,
             message: "Lấy chi tiết nhóm thành công",
+            tenNhom,
             manager,
             members,
         });
@@ -271,12 +276,13 @@ export const addTeamMember = async (req, res) => {
         }
 
         const newRecord = await NhomNhanSu.create({ managerCode, maNhanSu, tenNhom });
-        const { manager, members } = await buildTeamResponse(managerCode);
+        const { manager, members, tenNhom: currentTenNhom } = await buildTeamResponse(managerCode);
 
         return res.status(201).json({
             success: true,
             message: `Đã thêm nhân viên ${memberExists.hoTen} vào nhóm của ${managerExists.hoTen} thành công`,
             newMemberId: newRecord.id,
+            tenNhom: currentTenNhom,
             manager,
             members,
         });
@@ -324,11 +330,12 @@ export const removeTeamMember = async (req, res) => {
 
         await record.destroy();
 
-        const { manager, members } = await buildTeamResponse(managerCode);
+        const { manager, members, tenNhom: currentTenNhom } = await buildTeamResponse(managerCode);
 
         return res.status(200).json({
             success: true,
             message: `Đã xóa nhân sự ${removedNhanSu?.hoTen || removedMaNhanSu} khỏi nhóm thành công`,
+            tenNhom: currentTenNhom,
             manager,
             members,
         });
@@ -390,12 +397,13 @@ export const bulkAddTeamMembers = async (req, res) => {
             }
         }
 
-        const { manager, members: currentMembers } = await buildTeamResponse(managerCode);
+        const { manager, members: currentMembers, tenNhom: currentTenNhom } = await buildTeamResponse(managerCode);
 
         return res.status(200).json({
             success: true,
             message: `Đã thêm ${results.added.length} thành viên, bỏ qua ${results.skipped.length} thành viên`,
             results,
+            tenNhom: currentTenNhom,
             manager,
             members: currentMembers,
         });
@@ -450,11 +458,12 @@ export const setTeamMembers = async (req, res) => {
             await NhomNhanSu.bulkCreate(toCreate, { ignoreDuplicates: true });
         }
 
-        const { manager, members: currentMembers } = await buildTeamResponse(managerCode);
+        const { manager, members: currentMembers, tenNhom: currentTenNhom } = await buildTeamResponse(managerCode);
 
         return res.status(200).json({
             success: true,
             message: `Đã thiết lập nhóm với ${currentMembers.length} thành viên thành công`,
+            tenNhom: currentTenNhom,
             manager,
             members: currentMembers,
         });

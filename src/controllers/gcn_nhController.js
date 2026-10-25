@@ -11,6 +11,10 @@ import { VuViec } from "../models/vuViecModel.js";
 import { GiayUyQuyen } from "../models/GiayUyQuyenModel.js";
 import { DonDangKy } from "../models/donDangKyModel.js";
 import { DonDangKyNhanHieu_KH } from "../models/KH/donDangKyNhanHieu_KHModel.js";
+import { NhanSu_VuViec } from "../models/nhanSu_VuViecModel.js";
+import { DonSuaDoiGCN_NH_VN } from "../models/VN_SuaDoi_NH/donSuaDoiGCN_NH_VNModel.js";
+import { DonGiaHan_NH_VN } from "../models/VN_GiaHan_NH/donGiaHanNH_VNModel.js";
+import { DonCQSH_GCN_VN } from "../models/VN_ChuyenQuyenSH/donCQSH_GCN_VNModel.js";
 
 // Helper for token-based case-insensitive multi-word search
 const buildTokensSearchCondition = (value, fieldName) => {
@@ -88,6 +92,7 @@ export const getGCN_NHs = async (req, res) => {
         const whereCondition = {};
         applySoBangSearch(whereCondition, soBang);
         whereCondition.bangGoc = { [Op.ne]: 1 };
+        whereCondition.daXoa = { [Op.ne]: true };
 
         const totalItems = await GCN_NH.count({ where: whereCondition });
 
@@ -1578,5 +1583,106 @@ export const getGCNOptions = async (req, res) => {
         });
     } catch (error) {
         return res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+/**
+ * Xóa Giấy chứng nhận nhãn hiệu Việt Nam (GCN_NH_VN)
+ * Hỗ trợ cả DELETE /api/gcn_nh_vn/delete/:id và POST /api/gcn_nh_vn/delete
+ */
+export const deleteGCN_NH_VN = async (req, res) => {
+    const id = req.params.id || req.body.id;
+    const { maNhanSuCapNhap } = req.body;
+
+    if (!id) {
+        return res.status(400).json({ message: "Thiếu ID Giấy chứng nhận cần xóa!" });
+    }
+
+    const transaction = await GCN_NH.sequelize.transaction();
+    try {
+        const gcn = await GCN_NH.findByPk(id, { transaction });
+        if (!gcn) {
+            await transaction.rollback();
+            return res.status(404).json({ message: "Không tìm thấy Giấy chứng nhận nhãn hiệu!" });
+        }
+
+        const soBang = gcn.soBang;
+        const tenGCN = `GCN số ${soBang || id}`;
+
+        // 1. Tìm các vụ việc liên quan đến GCN này
+        const vuViecs = await VuViec.findAll({
+            where: {
+                [Op.or]: [
+                    { maDon: gcn.id, tenBang: "GCN_NH_VN" },
+                    ...(gcn.maHoSo ? [{ maHoSo: gcn.maHoSo, tenBang: "GCN_NH_VN" }] : [])
+                ]
+            },
+            transaction
+        });
+
+        if (vuViecs && vuViecs.length > 0) {
+            const vuViecIds = vuViecs.map(v => v.id);
+            // Xóa phân công nhân sự vụ việc
+            await NhanSu_VuViec.destroy({
+                where: { idVuViec: { [Op.in]: vuViecIds } },
+                transaction
+            }).catch(() => {});
+
+            // Xóa vụ việc liên quan
+            await VuViec.destroy({
+                where: { id: { [Op.in]: vuViecIds } },
+                transaction
+            });
+        }
+
+        // 2. Xóa các đơn sửa đổi / gia hạn / chuyển quyền liên kết trực tiếp nếu có
+        await DonSuaDoiGCN_NH_VN.destroy({
+            where: { [Op.or]: [{ idGCN_NH: id }, { idGCN_NH_Goc: id }] },
+            transaction
+        }).catch(() => {});
+
+        await DonGiaHan_NH_VN.destroy({
+            where: { idGCN_NH: id },
+            transaction
+        }).catch(() => {});
+
+        await DonCQSH_GCN_VN.destroy({
+            where: { [Op.or]: [{ idGCN_NH: id }, { idGCN_NH_Goc: id }] },
+            transaction
+        }).catch(() => {});
+
+        // 3. Thực hiện xóa GCN (xóa cứng, nếu có lỗi ràng buộc khóa ngoại thì fallback sang soft delete daXoa = true)
+        try {
+            await gcn.destroy({ transaction });
+        } catch (destroyError) {
+            await gcn.update({ daXoa: true }, { transaction });
+        }
+
+        await transaction.commit();
+
+        // Gửi thông báo nếu có mã nhân sự
+        if (maNhanSuCapNhap) {
+            sendGenericNotification({
+                maNhanSuCapNhap,
+                title: "Xóa Giấy chứng nhận nhãn hiệu",
+                bodyTemplate: (tenNhanSu) =>
+                    `${tenNhanSu} đã xóa Giấy chứng nhận nhãn hiệu '${tenGCN}'`,
+                data: { idGCN: id, soBang },
+            }).catch(() => {});
+        }
+
+        return res.status(200).json({
+            message: "Xóa Giấy chứng nhận nhãn hiệu thành công!",
+            data: { id, soBang }
+        });
+    } catch (error) {
+        if (transaction && !transaction.finished) {
+            await transaction.rollback();
+        }
+        console.error("❌ Lỗi xóa GCN_NH_VN:", error);
+        return res.status(500).json({
+            message: "Đã xảy ra lỗi khi xóa Giấy chứng nhận nhãn hiệu!",
+            error: error.message
+        });
     }
 };

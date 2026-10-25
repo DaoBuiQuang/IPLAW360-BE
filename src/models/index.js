@@ -63,11 +63,13 @@ import { DonSuaDoi_NH_KH } from "./KH_SuaDoi_NH/donSuaDoiNH_KHModel.js";
 import { DonSuaDoiGCN_NH_KH } from "./KH_SuaDoi_NH/donSuaDoiGCN_NH_KHModel.js";
 import { NguoiLienHe } from "./nguoiLienHeModal.js";
 import { GiayUyQuyen } from "./GiayUyQuyenModel.js";
-import { DonTachNH_VN } from "./VN_TachDon_NH/donTachNH_VNModel.js";
+import { DonTachNH_VN, DonTach_NH_VN } from "./VN_TachDon_NH/donTachNH_VNModel.js";
 import { DonTachNH_KH } from "./KH_TachDon_NH/donTachNH_KHModel.js";
 import { TimeSheet } from "./timeSheetModel.js";
 import { DanhSachCongViec } from "./dsCongViecModel.js";
 import { NhomNhanSu } from "./nhomNhanSuModel.js";
+import { DonCQSH_VN, DonCQSH_NH_VN } from "./VN_ChuyenQuyenSH/donCQSH_VNModel.js";
+import { DonCQSH_GCN_VN } from "./VN_ChuyenQuyenSH/donCQSH_GCN_VNModel.js";
 
 Auth.belongsTo(NhanSu, {
     foreignKey: 'maNhanSu',
@@ -225,6 +227,17 @@ export const syncDatabase = async () => {
         } catch (colErr) {
             // Error code 1060 means column already exists; 1146 means table not created yet
         }
+
+        // Safe check and add idGCN_NH_Goc, loaiBang, bangGoc to gcn_nh if not exists
+        try {
+            await sequelize.query(`ALTER TABLE gcn_nh ADD COLUMN loaiBang INT NULL DEFAULT 1;`);
+        } catch (e) {}
+        try {
+            await sequelize.query(`ALTER TABLE gcn_nh ADD COLUMN bangGoc TINYINT(1) NULL DEFAULT 0;`);
+        } catch (e) {}
+        try {
+            await sequelize.query(`ALTER TABLE gcn_nh ADD COLUMN idGCN_NH_Goc INT NULL DEFAULT NULL;`);
+        } catch (e) {}
 
         await sequelize.sync();
         console.log("✅ Database synchronized with all models");
@@ -555,6 +568,50 @@ NhanSu.hasMany(NhomNhanSu, {
     as: "nhomThamGia",
 });
 
+// ========= Quan hệ Chuyển quyền sở hữu Đơn đăng ký (DonCQSH_VN) =========
+DonDangKy.hasMany(DonCQSH_VN, {
+    foreignKey: "maDonDangKyGoc",
+    sourceKey: "maDonDangKy",
+    as: "DonCQSH_VN",
+});
+DonCQSH_VN.belongsTo(DonDangKy, {
+    foreignKey: "maDonDangKyGoc",
+    targetKey: "maDonDangKy",
+    as: "donGoc",
+});
+DonCQSH_VN.belongsTo(DonDangKy, {
+    foreignKey: "maDonDangKy",
+    targetKey: "maDonDangKy",
+    as: "donMoi",
+});
+DonCQSH_VN.belongsTo(KhachHangCuoi, {
+    foreignKey: "idKhachHang",
+    targetKey: "id",
+    as: "khachHangMoi",
+});
+
+// ========= Quan hệ Chuyển quyền sở hữu Giấy chứng nhận (DonCQSH_GCN_VN) =========
+GCN_NH.hasMany(DonCQSH_GCN_VN, {
+    foreignKey: "idGCN_NH_Goc",
+    sourceKey: "id",
+    as: "DonCQSH_GCN_VN",
+});
+DonCQSH_GCN_VN.belongsTo(GCN_NH, {
+    foreignKey: "idGCN_NH_Goc",
+    targetKey: "id",
+    as: "gcnGoc",
+});
+DonCQSH_GCN_VN.belongsTo(GCN_NH, {
+    foreignKey: "idGCN_NH",
+    targetKey: "id",
+    as: "gcnMoi",
+});
+DonCQSH_GCN_VN.belongsTo(KhachHangCuoi, {
+    foreignKey: "idKhachHang",
+    targetKey: "id",
+    as: "khachHangMoi",
+});
+
 export {
     sequelize,
     NganhNghe,
@@ -586,6 +643,7 @@ export {
     TuVanChung_VN,
     TuVanChung_KH,
     DonTachNH_VN,
+    DonTach_NH_VN,
     DonTachNH_KH,
     TimeSheet,
     DanhSachCongViec,
@@ -594,4 +652,7 @@ export {
     GCN_NH_KH,
     DonSuaDoiGCN_NH_VN,
     DonSuaDoiGCN_NH_KH,
+    DonCQSH_VN,
+    DonCQSH_NH_VN,
+    DonCQSH_GCN_VN,
 };

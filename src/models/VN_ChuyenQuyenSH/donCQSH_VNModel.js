@@ -75,3 +75,5 @@ export const DonCQSH_VN = sequelize.define("DonCQSH_VN", {
     timestamps: true,
     tableName: "DonCQSH_VN",
 });
+
+export const DonCQSH_NH_VN = DonCQSH_VN;

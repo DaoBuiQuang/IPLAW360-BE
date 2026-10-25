@@ -1,7 +1,7 @@
 import express from "express";
 
 import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.js";
-import {  addGCN_NH_Cam, addGCN_NH_VN, editGCN_NH_CAM, editGCN_NH_VN, getGCN_NH_CAMDetail, getGCN_NHDetail, getGCN_NHs, getGCN_NHs_SD, getGCN_NHsCAM, getGCN_NHsCAM_SD, getGCNOptions } from "../controllers/gcn_nhController.js";
+import {  addGCN_NH_Cam, addGCN_NH_VN, deleteGCN_NH_VN, editGCN_NH_CAM, editGCN_NH_VN, getGCN_NH_CAMDetail, getGCN_NHDetail, getGCN_NHs, getGCN_NHs_SD, getGCN_NHsCAM, getGCN_NHsCAM_SD, getGCNOptions } from "../controllers/gcn_nhController.js";
 const router = express.Router();
 
 /**
@@ -341,5 +341,63 @@ router.put("/gcn_nh_vn/edit", authenticateUser, editGCN_NH_VN);
  *         description: Không tìm thấy GCN
  */
 router.put("/gcn_nh_cam/edit", authenticateUser, editGCN_NH_CAM);
+
+/**
+ * @swagger
+ * /gcn_nh_vn/delete/{id}:
+ *   delete:
+ *     summary: Xóa giấy chứng nhận nhãn hiệu Việt Nam (theo path param id)
+ *     tags: [GCN Nhãn hiệu]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID của Giấy chứng nhận cần xóa
+ *     responses:
+ *       200:
+ *         description: Xóa Giấy chứng nhận thành công
+ *       400:
+ *         description: Thiếu ID Giấy chứng nhận
+ *       404:
+ *         description: Không tìm thấy Giấy chứng nhận
+ */
+router.delete("/gcn_nh_vn/delete/:id", authenticateUser, authorizeRoles("admin", "staff"), deleteGCN_NH_VN);
+
+/**
+ * @swagger
+ * /gcn_nh_vn/delete:
+ *   post:
+ *     summary: Xóa giấy chứng nhận nhãn hiệu Việt Nam (nhận body { id })
+ *     tags: [GCN Nhãn hiệu]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - id
+ *             properties:
+ *               id:
+ *                 type: integer
+ *                 example: 1
+ *               maNhanSuCapNhap:
+ *                 type: string
+ *                 example: "NV001"
+ *     responses:
+ *       200:
+ *         description: Xóa Giấy chứng nhận thành công
+ *       400:
+ *         description: Thiếu ID Giấy chứng nhận
+ *       404:
+ *         description: Không tìm thấy Giấy chứng nhận
+ */
+router.post("/gcn_nh_vn/delete", authenticateUser, authorizeRoles("admin", "staff"), deleteGCN_NH_VN);
 
 export default router;

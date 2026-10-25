@@ -19,6 +19,9 @@ import { GCN_NH } from "../models/GCN_NHModel.js";
 import { DonSuaDoi_NH_VN } from "../models/VN_SuaDoi_NH/donSuaDoiNH_VNModel.js";
 import { DonDangKyNhanHieu_KH } from "../models/KH/donDangKyNhanHieu_KHModel.js";
 import { GiayUyQuyen } from "../models/GiayUyQuyenModel.js";
+import { NhanSu_VuViec } from "../models/nhanSu_VuViecModel.js";
+import { DonCQSH_VN } from "../models/VN_ChuyenQuyenSH/donCQSH_VNModel.js";
+import { DonTachNH_VN } from "../models/VN_TachDon_NH/donTachNH_VNModel.js";
 import ExcelJS from "exceljs";
 
 // Helper for token-based substring search (case-insensitive)
@@ -220,10 +223,37 @@ export const getAllApplication = async (req, res) => {
         if (!fields.includes("donGoc")) fields.push("donGoc");
 
         // ====== Lọc cơ bản ======
-        if (trangThaiDon) whereCondition.trangThaiDon = trangThaiDon;
-        if (trangThaiVuViec) whereCondition.trangThaiVuViec = trangThaiVuViec; // ✅ thêm
+        if (trangThaiDon) {
+            whereCondition.trangThaiDon = trangThaiDon;
+        } else {
+            // Mặc định ẩn các đơn cũ đã chuyển quyền sở hữu
+            whereCondition.trangThaiDon = { [Op.ne]: "Đã chuyển quyền" };
+        }
+
+        if (trangThaiVuViec) {
+            whereCondition.trangThaiVuViec = trangThaiVuViec;
+        } else {
+            whereCondition.trangThaiVuViec = { [Op.ne]: "Đã chuyển quyền" };
+        }
+
         if (loaiDon) whereCondition.loaiDon = loaiDon;
         if (maNguoiXuLy1) whereCondition.maNguoiXuLy1 = maNguoiXuLy1;
+
+        // Loại bỏ các đơn cũ đã bị chuyển quyền đi (có donGoc = 1 kết hợp trạng thái Đã chuyển quyền)
+        whereCondition[Op.and] = whereCondition[Op.and] || [];
+        whereCondition[Op.and].push({
+            [Op.not]: {
+                [Op.and]: [
+                    { donGoc: 1 },
+                    {
+                        [Op.or]: [
+                            { trangThaiVuViec: "Đã chuyển quyền" },
+                            { trangThaiDon: "Đã chuyển quyền" }
+                        ]
+                    }
+                ]
+            }
+        });
         // ====== Lọc trạng thái tài liệu ======
         if (trangThaiTaiLieu) {
             if (Number(trangThaiTaiLieu) === 1) {
@@ -1217,35 +1247,282 @@ export const updateApplication = async (req, res) => {
 };
 
 export const deleteApplication = async (req, res) => {
+    const transaction = await DonDangKy.sequelize.transaction();
     try {
         const { maDonDangKy, maNhanSuCapNhap } = req.body;
 
         if (!maDonDangKy) {
+            await transaction.rollback();
             return res.status(400).json({ message: "Thiếu mã đơn đăng ký" });
         }
 
-        const don = await DonDangKy.findByPk(maDonDangKy);
+        const don = await DonDangKy.findByPk(maDonDangKy, { transaction });
         if (!don) {
+            await transaction.rollback();
             return res.status(404).json({ message: "Không tìm thấy đơn đăng ký" });
         }
-        await TaiLieu.destroy({ where: { maDonDangKy: maDonDangKy } });
-        await don.destroy();
-        await sendGenericNotification({
-            maNhanSuCapNhap,
-            title: "Xóa đơn đăng ký",
-            bodyTemplate: (tenNhanSu) =>
-                `${tenNhanSu} đã xóa đơn đăng ký '${don.soDon}'`,
-            data: {
-                maDonDangKy,
-            },
+
+        // 1. Kiểm tra xem đơn này có phải là đơn nhận chuyển quyền hay không (tìm trong bảng DonCQSH_VN)
+        const donCQ = await DonCQSH_VN.findOne({
+            where: { maDonDangKy: maDonDangKy },
+            transaction,
         });
-        res.status(200).json({ message: "Đã xoá đơn đăng ký và tài liệu liên quan" });
-    } catch (error) {
-        if (error.name === "SequelizeForeignKeyConstraintError") {
-            return res.status(400).json({ message: "Đơn đăng ký đang được sử dụng, không thể xóa." });
+
+        if (donCQ) {
+            // === TRƯỜNG HỢP: ĐƠN NHẬN CHUYỂN QUYỀN SỞ HỮU ===
+            const maDonGoc = donCQ.maDonDangKyGoc;
+            const donCu = await DonDangKy.findByPk(maDonGoc, { transaction });
+
+            // 1. Xóa bản ghi chuyển quyền tương ứng trong bảng DonCQSH_VN
+            await donCQ.destroy({ transaction });
+
+            // 2. Xóa các vụ việc (VuViec) và giải phóng phân công nhân sự (NhanSu_VuViec) liên kết với đơn mới
+            const vuViecs = await VuViec.findAll({
+                where: {
+                    [Op.or]: [
+                        { maDon: don.maDonDangKy },
+                        ...(don.id ? [{ maDon: don.id }] : []),
+                        ...(don.maHoSo ? [{ maHoSo: don.maHoSo, tenBang: "DonDangKy" }] : []),
+                        ...(don.soDon ? [{ soDon: don.soDon, tenBang: "DonDangKy" }] : []),
+                    ]
+                },
+                transaction
+            });
+
+            if (vuViecs && vuViecs.length > 0) {
+                const vuViecIds = vuViecs.map(v => v.id);
+                await NhanSu_VuViec.destroy({
+                    where: { idVuViec: { [Op.in]: vuViecIds } },
+                    transaction
+                }).catch(() => {});
+
+                await VuViec.destroy({
+                    where: { id: { [Op.in]: vuViecIds } },
+                    transaction
+                });
+            }
+
+            // 3. Xóa tài liệu, sản phẩm dịch vụ và lịch sử thẩm định liên kết với đơn mới
+            await TaiLieu.destroy({ where: { maDonDangKy }, transaction });
+            await DonDK_SPDV.destroy({ where: { maDonDangKy }, transaction }).catch(() => {});
+            await LichSuThamDinh.destroy({ where: { maDonDangKy }, transaction }).catch(() => {});
+
+            // 4. Xóa bản ghi đơn mới
+            await don.destroy({ transaction });
+
+            // 5. Hoàn trả lại quyền sở hữu đơn cho chủ cũ
+            if (donCu) {
+                // Khôi phục trạng thái đơn hợp lệ trước khi chuyển quyền
+                const trangThaiDonKhoiPhuc = (donCu.trangThaiDon === "Đã chuyển quyền" || !donCu.trangThaiDon)
+                    ? (donCu.soDon ? "Thẩm định hình thức" : "Đang giải quyết")
+                    : donCu.trangThaiDon;
+
+                await donCu.update(
+                    {
+                        donGoc: 0, // Đơn cũ trở lại thành đơn hoạt động chính thức
+                        trangThaiVuViec: "1", // 1 = Đang giải quyết
+                        trangThaiDon: trangThaiDonKhoiPhuc,
+                    },
+                    { transaction }
+                );
+            }
+
+            await transaction.commit();
+
+            // Gửi thông báo nếu có
+            if (maNhanSuCapNhap) {
+                sendGenericNotification({
+                    maNhanSuCapNhap,
+                    title: "Hủy chuyển quyền & Hoàn trả đơn",
+                    bodyTemplate: (tenNhanSu) =>
+                        `${tenNhanSu} đã xóa đơn nhận chuyển quyền '${don.soDon || maDonDangKy}' và hoàn trả lại cho đơn gốc '${donCu?.soDon || maDonGoc}'`,
+                    data: { maDonDangKy, maDonGoc },
+                }).catch(() => {});
+            }
+
+            return res.status(200).json({
+                message: "Đã xóa đơn chuyển quyền và hoàn trả đơn lại cho chủ cũ thành công!",
+                data: {
+                    maDonDangKyMoi: maDonDangKy,
+                    maDonDangKyCu: maDonGoc,
+                }
+            });
         }
 
-        res.status(500).json({ message: error.message });
+        // =========================================================================
+        // 2. KIỂM TRA ĐƠN TÁCH (bảng DonTachNH_VN - vai trò là đơn tách mới maDonDangKy)
+        // =========================================================================
+        const donTach = await DonTachNH_VN.findOne({
+            where: { maDonDangKy: maDonDangKy },
+            transaction,
+        });
+
+        if (donTach) {
+            // === TRƯỜNG HỢP: ĐƠN TÁCH (TỜ KHAI TÁCH ĐƠN ĐĂNG KÝ NHÃN HIỆU) ===
+            const maDonGoc = donTach.maDonDangKyGoc;
+            const donCu = await DonDangKy.findByPk(maDonGoc, { transaction });
+
+            // 1. Xóa bản ghi liên kết trong bảng DonTachNH_VN
+            await donTach.destroy({ transaction });
+
+            // 2. Xóa các vụ việc (VuViec) và giải phóng phân công nhân sự (NhanSu_VuViec) liên kết với đơn tách
+            const vuViecs = await VuViec.findAll({
+                where: {
+                    [Op.or]: [
+                        { maDon: don.maDonDangKy },
+                        ...(don.id ? [{ maDon: don.id }] : []),
+                        ...(don.maHoSo ? [{ maHoSo: don.maHoSo, tenBang: "DonDangKy" }] : []),
+                        ...(don.soDon ? [{ soDon: don.soDon, tenBang: "DonDangKy" }] : []),
+                    ]
+                },
+                transaction
+            });
+
+            if (vuViecs && vuViecs.length > 0) {
+                const vuViecIds = vuViecs.map(v => v.id);
+                await NhanSu_VuViec.destroy({
+                    where: { idVuViec: { [Op.in]: vuViecIds } },
+                    transaction
+                }).catch(() => {});
+
+                await VuViec.destroy({
+                    where: { id: { [Op.in]: vuViecIds } },
+                    transaction
+                });
+            }
+
+            // 3. Xóa các nhóm SPDV liên kết, tài liệu và lịch sử thẩm định của đơn tách
+            await DonDK_SPDV.destroy({ where: { maDonDangKy }, transaction }).catch(() => {});
+            await TaiLieu.destroy({ where: { maDonDangKy }, transaction });
+            await LichSuThamDinh.destroy({ where: { maDonDangKy }, transaction }).catch(() => {});
+
+            // 4. Xóa bản ghi đơn tách trong bảng DonDangKy
+            await don.destroy({ transaction });
+
+            // 5. Cập nhật lại đơn gốc (nếu có đánh dấu trạng thái tách đơn)
+            if (donCu) {
+                const remainingDonTach = await DonTachNH_VN.count({
+                    where: { maDonDangKyGoc: maDonGoc },
+                    transaction
+                });
+
+                if (remainingDonTach === 0) {
+                    const updateData = {};
+                    if (donCu.donGoc === 1) updateData.donGoc = 0;
+                    if (donCu.trangThaiDon === "Đã tách đơn") {
+                        updateData.trangThaiDon = donCu.soDon ? "Thẩm định hình thức" : "Đang giải quyết";
+                    }
+                    if (donCu.trangThaiVuViec === "Đã tách đơn") {
+                        updateData.trangThaiVuViec = "1";
+                    }
+                    if (Object.keys(updateData).length > 0) {
+                        await donCu.update(updateData, { transaction });
+                    }
+                }
+            }
+
+            await transaction.commit();
+
+            // Gửi thông báo nếu có
+            if (maNhanSuCapNhap) {
+                sendGenericNotification({
+                    maNhanSuCapNhap,
+                    title: "Xóa đơn tách",
+                    bodyTemplate: (tenNhanSu) =>
+                        `${tenNhanSu} đã xóa đơn tách '${don.soDon || maDonDangKy}' liên kết từ đơn gốc '${donCu?.soDon || maDonGoc}'`,
+                    data: { maDonDangKy, maDonGoc },
+                }).catch(() => {});
+            }
+
+            return res.status(200).json({
+                message: "Xóa đơn tách thành công!",
+                data: {
+                    maDonDangKy,
+                    maDonDangKyGoc: maDonGoc,
+                }
+            });
+        }
+
+        // === TRƯỜNG HỢP: ĐƠN THÔNG THƯỜNG ===
+        // Kiểm tra xem đơn này có đang là đơn gốc của các đơn tách con không
+        const countDonTachCon = await DonTachNH_VN.count({
+            where: { maDonDangKyGoc: maDonDangKy },
+            transaction
+        });
+        if (countDonTachCon > 0) {
+            await transaction.rollback();
+            return res.status(400).json({
+                message: `Đơn đăng ký đang là đơn gốc của ${countDonTachCon} đơn tách, vui lòng xóa các đơn tách trước khi xóa đơn gốc!`
+            });
+        }
+
+        // Kiểm tra xem đơn này có đang là đơn gốc của đơn chuyển quyền không
+        const countCQCon = await DonCQSH_VN.count({
+            where: { maDonDangKyGoc: maDonDangKy },
+            transaction
+        });
+        if (countCQCon > 0) {
+            await transaction.rollback();
+            return res.status(400).json({
+                message: "Đơn đăng ký đang có hồ sơ chuyển quyền sở hữu liên kết, vui lòng xóa hồ sơ chuyển quyền trước khi xóa đơn gốc!"
+            });
+        }
+        // Xóa các vụ việc và giải phóng nhân sự liên quan nếu có
+        const vuViecs = await VuViec.findAll({
+            where: {
+                [Op.or]: [
+                    { maDon: don.maDonDangKy },
+                    ...(don.id ? [{ maDon: don.id }] : []),
+                    ...(don.maHoSo ? [{ maHoSo: don.maHoSo, tenBang: "DonDangKy" }] : []),
+                ]
+            },
+            transaction
+        });
+
+        if (vuViecs && vuViecs.length > 0) {
+            const vuViecIds = vuViecs.map(v => v.id);
+            await NhanSu_VuViec.destroy({
+                where: { idVuViec: { [Op.in]: vuViecIds } },
+                transaction
+            }).catch(() => {});
+
+            await VuViec.destroy({
+                where: { id: { [Op.in]: vuViecIds } },
+                transaction
+            });
+        }
+
+        // Xóa tài liệu, sản phẩm dịch vụ và lịch sử thẩm định
+        await TaiLieu.destroy({ where: { maDonDangKy }, transaction });
+        await DonDK_SPDV.destroy({ where: { maDonDangKy }, transaction }).catch(() => {});
+        await LichSuThamDinh.destroy({ where: { maDonDangKy }, transaction }).catch(() => {});
+
+        // Xóa bản ghi đơn
+        await don.destroy({ transaction });
+
+        await transaction.commit();
+
+        if (maNhanSuCapNhap) {
+            sendGenericNotification({
+                maNhanSuCapNhap,
+                title: "Xóa đơn đăng ký",
+                bodyTemplate: (tenNhanSu) =>
+                    `${tenNhanSu} đã xóa đơn đăng ký '${don.soDon || maDonDangKy}'`,
+                data: { maDonDangKy },
+            }).catch(() => {});
+        }
+
+        return res.status(200).json({ message: "Đã xoá đơn đăng ký và tài liệu liên quan thành công!" });
+    } catch (error) {
+        if (transaction && !transaction.finished) {
+            await transaction.rollback();
+        }
+        if (error.name === "SequelizeForeignKeyConstraintError") {
+            return res.status(400).json({ message: "Đơn đăng ký đang được sử dụng ở các dữ liệu liên quan khác, không thể xóa." });
+        }
+
+        console.error("❌ Lỗi khi xóa đơn đăng ký:", error);
+        return res.status(500).json({ message: error.message });
     }
 };
 
@@ -1510,7 +1787,6 @@ export const getApplicationsByGUQ = async (req, res) => {
 
 
 import iconv from "iconv-lite";
-import { DonTachNH_VN } from "../models/index.js";
 import dayjs from "dayjs";
 
 const fixVietnamese = (str) => {
@@ -1559,10 +1835,35 @@ export const exportApplicationsToExcel = async (req, res) => {
 
         const whereCondition = {};
 
-        if (trangThaiDon) whereCondition.trangThaiDon = trangThaiDon;
-        if (trangThaiVuViec) whereCondition.trangThaiVuViec = trangThaiVuViec;
+        if (trangThaiDon) {
+            whereCondition.trangThaiDon = trangThaiDon;
+        } else {
+            whereCondition.trangThaiDon = { [Op.ne]: "Đã chuyển quyền" };
+        }
+
+        if (trangThaiVuViec) {
+            whereCondition.trangThaiVuViec = trangThaiVuViec;
+        } else {
+            whereCondition.trangThaiVuViec = { [Op.ne]: "Đã chuyển quyền" };
+        }
+
         if (loaiDon) whereCondition.loaiDon = loaiDon;
         if (maNguoiXuLy1) whereCondition.maNguoiXuLy1 = maNguoiXuLy1;
+
+        whereCondition[Op.and] = whereCondition[Op.and] || [];
+        whereCondition[Op.and].push({
+            [Op.not]: {
+                [Op.and]: [
+                    { donGoc: 1 },
+                    {
+                        [Op.or]: [
+                            { trangThaiVuViec: "Đã chuyển quyền" },
+                            { trangThaiDon: "Đã chuyển quyền" }
+                        ]
+                    }
+                ]
+            }
+        });
 
         if (trangThaiTaiLieu) {
             if (Number(trangThaiTaiLieu) === 1) {

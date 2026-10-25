@@ -70,3 +70,5 @@ export const DonTachNH_VN = sequelize.define("DonTachNH_VN", {
     timestamps: true,
     tableName: "DonTachNH_VN",
 });
+
+export const DonTach_NH_VN = DonTachNH_VN;

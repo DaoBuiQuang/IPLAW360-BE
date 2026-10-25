@@ -138,6 +138,14 @@ export const GCN_NH = sequelize.define("GCN_NH", {
         allowNull: true,
         defaultValue: 0,
     },
+    idGCN_NH_Goc: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: {
+            model: "gcn_nh",
+            key: "id",
+        },
+    },
     hanGiaHan: {
         type: DataTypes.DATEONLY,
         allowNull: true,

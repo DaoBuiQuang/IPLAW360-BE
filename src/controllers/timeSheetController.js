@@ -621,6 +621,37 @@ export const getTimeSheetById = async (req, res) => {
 };
 
 /**
+ * Helper: Kiểm tra một phòng ban có phải là CNTT không
+ */
+const isCNTTDepartment = (phongBan) => {
+    if (!phongBan) return false;
+    const clean = String(phongBan).trim().toUpperCase();
+    return clean === "CNTT" || clean.includes("CNTT");
+};
+
+/**
+ * Helper: Lấy danh sách mã nhân sự thuộc phòng ban CNTT
+ */
+const getCnttEmployeeCodes = async () => {
+    try {
+        const cnttEmployees = await NhanSu.findAll({
+            where: {
+                [Op.or]: [
+                    { phongBan: "CNTT" },
+                    { phongBan: { [Op.like]: "%CNTT%" } },
+                ],
+            },
+            attributes: ["maNhanSu"],
+            raw: true,
+        });
+        return cnttEmployees.map((e) => e.maNhanSu).filter(Boolean);
+    } catch (err) {
+        console.error("Lỗi getCnttEmployeeCodes:", err);
+        return [];
+    }
+};
+
+/**
  * Helper: Xác định điều kiện lọc employeeCode dựa trên vai trò của người dùng và các tham số lọc
  */
 const resolveEmployeeCodeCondition = async (reqUser, targetEmployee, teamManagerCode) => {
@@ -666,6 +697,11 @@ const resolveEmployeeCodeCondition = async (reqUser, targetEmployee, teamManager
             });
             const teamCodes = [...new Set([teamManagerCode, ...teamMembers.map((m) => m.maNhanSu)])];
             return { [Op.in]: teamCodes };
+        }
+        // Chế độ xem tổng quan / office task toàn công ty: BẮT BUỘC loại trừ các nhân sự thuộc phòng ban CNTT
+        const cnttCodes = await getCnttEmployeeCodes();
+        if (cnttCodes.length > 0) {
+            return { [Op.notIn]: cnttCodes };
         }
         return null; // Không giới hạn nhân sự (xem toàn bộ công ty)
     }
@@ -1178,7 +1214,15 @@ export const getTimesheetKPI = async (req, res) => {
         const targetHours = workingDays * 8;
 
         const where = { workDate: { [Op.between]: [fromDate, toDate] } };
-        if (employeeCodes.length > 0) where.employeeCode = { [Op.in]: employeeCodes };
+        if (employeeCodes.length > 0) {
+            where.employeeCode = { [Op.in]: employeeCodes };
+        } else if (!reqEmployeeCode && !teamManagerCode) {
+            // Xem toàn công ty: BẮT BUỘC loại trừ nhân sự CNTT khỏi KPI tổng hợp
+            const cnttCodes = await getCnttEmployeeCodes();
+            if (cnttCodes.length > 0) {
+                where.employeeCode = { [Op.notIn]: cnttCodes };
+            }
+        }
 
         const rows = await TimeSheet.findAll({
             where,
@@ -1283,8 +1327,18 @@ export const getOfficeSummary = async (req, res) => {
             nest: true,
         });
 
+        // Lấy danh sách nhân sự CNTT để loại trừ khỏi thống kê toàn công ty
+        const cnttCodes = await getCnttEmployeeCodes();
+        const cnttCodesSet = new Set(cnttCodes);
+
+        // Danh sách nhân sự KHÔNG thuộc phòng ban CNTT
+        const nonCnttEmployees = allEmployees.filter(
+            (emp) => !cnttCodesSet.has(emp.maNhanSu) && !isCNTTDepartment(emp.phongBan)
+        );
+
         // 2. Lấy tất cả nhóm manager
         const allGroups = await NhomNhanSu.findAll({
+            attributes: ["id", "managerCode", "maNhanSu", "tenNhom"],
             include: [
                 { model: NhanSu, as: "manager", attributes: ["maNhanSu", "hoTen"] },
                 { model: NhanSu, as: "thanhVien", attributes: ["maNhanSu", "hoTen"] },
@@ -1312,17 +1366,18 @@ export const getOfficeSummary = async (req, res) => {
             tsMap[code].recordCount += 1;
         }
 
-        // 4. TỔNG TOÀN CÔNG TY (Tính trực tiếp từ allRows & allEmployees)
-        const companyTotalHours = allRows.reduce((s, r) => s + Number(r.hours || 0), 0);
-        const companyTotalAmount = allRows.reduce((s, r) => s + Number(r.totalAmount || 0), 0);
-        const companyRecordCount = allRows.length;
-        const companyTargetHours = allEmployees.length * targetHoursPerPerson;
+        // 4. TỔNG TOÀN CÔNG TY (BẮT BUỘC loại trừ các nhân sự thuộc phòng ban CNTT)
+        const nonCnttRows = allRows.filter((r) => !cnttCodesSet.has(r.employeeCode));
+        const companyTotalHours = nonCnttRows.reduce((s, r) => s + Number(r.hours || 0), 0);
+        const companyTotalAmount = nonCnttRows.reduce((s, r) => s + Number(r.totalAmount || 0), 0);
+        const companyRecordCount = nonCnttRows.length;
+        const companyTargetHours = nonCnttEmployees.length * targetHoursPerPerson;
         const companyCompletionRate = companyTargetHours > 0
             ? Math.round((companyTotalHours / companyTargetHours) * 10000) / 100
             : 0;
 
-        // 5. Build danh sách allStaff
-        const allStaff = allEmployees.map((emp) => {
+        // 5. Build danh sách allStaff: Chỉ bao gồm các nhân sự không thuộc phòng ban CNTT
+        const allStaff = nonCnttEmployees.map((emp) => {
             const data = tsMap[emp.maNhanSu] || { totalHours: 0, totalAmount: 0, recordCount: 0 };
             const authRole = emp.Auth?.Role || emp["Auth.Role"] || emp.Role || null;
             const isManager = managerCodesSet.has(emp.maNhanSu) || String(authRole || "").toLowerCase() === "manager";
@@ -1354,8 +1409,11 @@ export const getOfficeSummary = async (req, res) => {
                 teamMap[mgCode] = {
                     managerCode: mgCode,
                     managerName: rec.manager?.hoTen || mgCode,
+                    tenNhom: rec.tenNhom || null,
                     members: [],
                 };
+            } else if (!teamMap[mgCode].tenNhom && rec.tenNhom) {
+                teamMap[mgCode].tenNhom = rec.tenNhom;
             }
             if (rec.thanhVien) {
                 teamMap[mgCode].members.push({
@@ -1393,6 +1451,7 @@ export const getOfficeSummary = async (req, res) => {
             return {
                 managerCode: team.managerCode,
                 managerName: team.managerName,
+                tenNhom: team.tenNhom || null,
                 teamTotalHours: Math.round(teamTotalHours * 100) / 100,
                 teamTargetHours,
                 teamCompletionRate,
