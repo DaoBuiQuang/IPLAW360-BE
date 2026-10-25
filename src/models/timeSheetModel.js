@@ -40,7 +40,7 @@ export const TimeSheet = sequelize.define("TimeSheet", {
         },
     },
     activity: {
-        type: DataTypes.STRING(100),
+        type: DataTypes.TEXT,
         allowNull: false,
     },
     description: {
@@ -102,7 +102,5 @@ export const TimeSheet = sequelize.define("TimeSheet", {
         { fields: ["customerCode"] },
         { fields: ["workDate"] },
         { fields: ["status"] },
-        { name: "idx_ts_case_date", fields: ["caseCode", "workDate"] },
-        { name: "idx_ts_emp_case_date", fields: ["employeeCode", "caseCode", "workDate"] },
     ],
 });
