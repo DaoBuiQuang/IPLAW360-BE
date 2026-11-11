@@ -16,6 +16,7 @@ import { HoSo_VuViec } from "../models/hoSoVuViecModel.js";
 import { QuocGia } from "../models/quocGiaModel.js";
 import { DoiTac } from "../models/doiTacModel.js";
 import { KhachHangCuoi } from "../models/khanhHangCuoiModel.js";
+import { isPersonalTimesheetRole, isTimesheetOnlyRole } from "../utils/accountRoles.js";
 
 export const roundDecimal = (num, decimals = 2) => {
     if (num === null || num === undefined || isNaN(Number(num))) return 0;
@@ -111,6 +112,9 @@ export const getCaseCodeOptions = async (req, res) => {
                         ]
                     }
                 };
+                if (model === TimeSheet && isTimesheetOnlyRole(req.user?.role)) {
+                    where.employeeCode = req.user.maNhanSu;
+                }
                 if (searchTokens.length > 0) {
                     searchTokens.forEach(tok => {
                         where[field][Op.and].push({ [Op.like]: `%${tok}%` });
@@ -410,8 +414,12 @@ export const getCaseInfo = async (req, res) => {
 
         // 5. TimeSheet: caseCode = caseCode (lấy bản ghi gần nhất có đầy đủ customerCode, partnerCode nếu hồ sơ này từng được log time trước đó)
         try {
+            const timesheetScope = isTimesheetOnlyRole(req.user?.role)
+                ? { employeeCode: req.user.maNhanSu }
+                : {};
             let tsRecord = await TimeSheet.findOne({
                 where: {
+                    ...timesheetScope,
                     caseCode: code,
                     customerCode: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] },
                     partnerCode: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] },
@@ -423,6 +431,7 @@ export const getCaseInfo = async (req, res) => {
             if (!tsRecord) {
                 tsRecord = await TimeSheet.findOne({
                     where: {
+                        ...timesheetScope,
                         caseCode: code,
                         [Op.or]: [
                             { customerCode: { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] } },
@@ -590,6 +599,7 @@ export const updateTimeSheet = async (req, res) => {
 
         const fields = ["employeeCode", "caseCode", "countryCode", "partnerCode", "customerCode", "workDate", "activity", "description", "notes"];
         for (const field of fields) {
+            if (field === "employeeCode" && isTimesheetOnlyRole(req.user?.role)) continue;
             if (req.body[field] !== undefined) timeSheet[field] = req.body[field];
         }
         Object.assign(timeSheet, workData);
@@ -612,6 +622,9 @@ export const getTimeSheetById = async (req, res) => {
         const { id } = req.body;
         const timeSheet = await TimeSheet.findByPk(id);
         if (!timeSheet) return res.status(404).json({ message: "Timesheet không tồn tại" });
+        if (isTimesheetOnlyRole(req.user?.role) && timeSheet.employeeCode !== req.user.maNhanSu) {
+            return res.status(403).json({ message: "Bạn chỉ được xem Time Record của chính mình" });
+        }
 
         const [result] = await enrichTimeSheets([timeSheet]);
         return res.status(200).json(result);
@@ -659,7 +672,7 @@ const resolveEmployeeCodeCondition = async (reqUser, targetEmployee, teamManager
     const userCode = reqUser?.maNhanSu || reqUser?.employeeCode;
 
     // Nhân viên / Thực tập sinh chỉ xem data của chính mình
-    if (userRole === "staff" || userRole === "trainee") {
+    if (isPersonalTimesheetRole(userRole)) {
         return userCode;
     }
 
@@ -905,8 +918,10 @@ export const getTimeSheetsByCase = async (req, res) => {
         const { caseCode } = req.body;
         if (!caseCode) return res.status(400).json({ message: "Mã hồ sơ là bắt buộc" });
 
+        const where = { caseCode };
+        if (isTimesheetOnlyRole(req.user?.role)) where.employeeCode = req.user.maNhanSu;
         const timeSheets = await TimeSheet.findAll({
-            where: { caseCode },
+            where,
             order: [["workDate", "DESC"], ["id", "DESC"]],
         });
         const data = await enrichTimeSheets(timeSheets);
@@ -1029,6 +1044,7 @@ export const checkCaseContributions = async (req, res) => {
         const where = {
             caseCode: caseCode ? caseCode : { [Op.and]: [{ [Op.ne]: null }, { [Op.ne]: "" }] },
         };
+        if (isTimesheetOnlyRole(req.user?.role)) where.employeeCode = req.user.maNhanSu;
         if (fromDate || toDate) {
             where.workDate = {};
             if (fromDate) where.workDate[Op.gte] = fromDate;
@@ -1174,7 +1190,7 @@ export const getTimesheetKPI = async (req, res) => {
         let employeeCodes = [];
         let resolvedManagerCode = null;
 
-        if (userRole === "staff" || userRole === "trainee") {
+        if (isPersonalTimesheetRole(userRole)) {
             // NV chỉ xem bản thân
             employeeCodes = [userCode];
         } else if (userRole === "manager") {
@@ -1653,7 +1669,7 @@ export const getMatterActivities = async (req, res) => {
             raw: true,
         });
 
-        const allCaseRows = await TimeSheet.findAll({
+        const allCaseRows = isTimesheetOnlyRole(req.user?.role) ? rows : await TimeSheet.findAll({
             where: { caseCode },
             attributes: ["activity", "employeeCode"],
             raw: true,
@@ -1746,7 +1762,7 @@ export const getMatterActivityDetail = async (req, res) => {
         const userRole = String(req.user?.role || "").toLowerCase();
         const userCode = req.user?.maNhanSu || req.user?.employeeCode;
 
-        if (userRole === "staff" || userRole === "trainee") {
+        if (isPersonalTimesheetRole(userRole)) {
             if (timeSheet.employeeCode !== userCode) {
                 return res.status(403).json({ message: "Ban chi duoc xem time record cua chinh minh" });
             }

@@ -45,6 +45,7 @@ import { syncDatabase } from "./src/models/index.js";
 import { swaggerUi, swaggerSpec } from "./src/config/swagger.js";
 
 import cors from "cors";
+import { authenticateApiRequest } from "./src/middleware/authMiddleware.js";
 
 const app = express();
 app.use(express.json({ limit: '50mb' }));
@@ -71,6 +72,7 @@ app.get('/api-docs.json', (req, res) => {
 app.get('/', (req, res) => {
   return res.send('Hello World');
 });
+app.use("/api", authenticateApiRequest);
 app.use("/api", authRouter)
 app.use("/api", mailRouter);
 app.use("/api", nhanSuRouter)

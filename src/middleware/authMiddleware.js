@@ -1,9 +1,21 @@
 import { Auth } from "../models/authModel.js";
 import jwt from "jsonwebtoken";
 import dotenv from "dotenv";
+import { canUseTimesheetApi, isTimesheetOnlyRole } from "../utils/accountRoles.js";
 
 dotenv.config();
+const authenticatedRequest = Symbol("authenticatedRequest");
+
+// Also protect routes with optional authentication when a signed-in account calls them.
+export const authenticateApiRequest = (req, res, next) => {
+    if (req.path.toLowerCase().replace(/\/+$/, "") === "/login" || !req.header("Authorization")) {
+        return next();
+    }
+    return authenticateUser(req, res, next);
+};
+
 export const authenticateUser = async (req, res, next) => {
+    if (req[authenticatedRequest]) return next();
     const bearerToken = req.header("Authorization");
 
     if (!bearerToken) {
@@ -30,7 +42,14 @@ export const authenticateUser = async (req, res, next) => {
         }
 
         // Gắn user info vào request để controller có thể dùng
-        req.user = decoded;
+        req.user = { ...decoded, maNhanSu: user.maNhanSu, role: user.Role };
+
+        if (isTimesheetOnlyRole(req.user.role)) {
+            if (!req.user.maNhanSu || !canUseTimesheetApi(req.method, req.path)) {
+                return res.status(403).json({ message: "Tài khoản này chỉ được sử dụng Timesheet" });
+            }
+        }
+        req[authenticatedRequest] = true;
 
         next(); // Cho phép đi tiếp
     } catch (error) {

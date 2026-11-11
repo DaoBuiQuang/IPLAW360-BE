@@ -10,6 +10,7 @@ import {
     updateStaffRole,
 } from "../controllers/nhanSuController.js";
 import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.js";
+import { TIMESHEET_STAFF_ROLE } from "../utils/accountRoles.js";
 
 const router = express.Router();
 
@@ -155,7 +156,7 @@ router.post("/staff/list",authenticateUser,authorizeRoles("admin", "manager"), g
  *       404:
  *         description: Không tìm thấy nhân sự
  */
-router.post("/staff/detail",authenticateUser,authorizeRoles("admin", "manager", "staff", "trainee"), getNhanSuById);
+router.post("/staff/detail",authenticateUser,authorizeRoles("admin", "manager", "staff", "trainee", TIMESHEET_STAFF_ROLE), getNhanSuById);
 
 /**
  * @swagger
@@ -210,7 +211,7 @@ router.post("/staff/delete",authenticateUser,authorizeRoles("admin"), deleteNhan
  *       401:
  *         description: Không có quyền truy cập
  */
-router.post("/staff/basiclist", authenticateUser, authorizeRoles("admin", "manager", "staff", "trainee"), getNhanSuBasicList);
+router.post("/staff/basiclist", authenticateUser, authorizeRoles("admin", "manager", "staff", "trainee", TIMESHEET_STAFF_ROLE), getNhanSuBasicList);
 
 /**
  * @swagger
@@ -254,7 +255,7 @@ router.get("/staff/myteam", authenticateUser, authorizeRoles("manager", "admin")
  *                 example: "NS001"
  *               role:
  *                 type: string
- *                 enum: [manager, staff, admin, trainee]
+ *                 enum: [manager, staff, admin, trainee, timesheet_staff]
  *                 example: "manager"
  *     responses:
  *       200:

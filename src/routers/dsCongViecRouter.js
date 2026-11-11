@@ -9,9 +9,10 @@ import {
     searchDanhSachCongViec,
 } from "../controllers/dsCongViecController.js";
 import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.js";
+import { TIMESHEET_STAFF_ROLE } from "../utils/accountRoles.js";
 
 const router = express.Router();
-const allowedRoles = ["admin", "ceo", "manager", "staff"];
+const allowedRoles = ["admin", "ceo", "manager", "staff", TIMESHEET_STAFF_ROLE];
 
 /**
  * @swagger

@@ -5,6 +5,7 @@ import { NhanSu } from "../models/nhanSuModel.js";
 // Tạm tắt thao tác FCM token cùng notification Firebase.
 // import { FCMToken } from "../models/fcmTokenModel.js";
 import dotenv from "dotenv";
+import { ACCOUNT_ROLES } from "../utils/accountRoles.js";
 
 dotenv.config();
 export const register = async (req, res) => {
@@ -15,9 +16,9 @@ export const register = async (req, res) => {
             return res.status(400).json({ message: "Mã nhân sự, tên đăng nhập, mật khẩu và vai trò là bắt buộc" });
         }
 
-        const allowedRoles = ['admin', 'staff', 'trainee', 'manager']; 
+        const allowedRoles = ACCOUNT_ROLES;
         if (!allowedRoles.includes(role)) {
-            return res.status(400).json({ message: "Vai trò không hợp lệ. Chỉ chấp nhận: admin, staff, trainee, manager" });
+            return res.status(400).json({ message: `Vai trò không hợp lệ. Chỉ chấp nhận: ${allowedRoles.join(", ")}` });
         }
 
         const existingUser = await Auth.findOne({ where: { Username: username } });
@@ -79,7 +80,7 @@ export const login = async (req, res) => {
 
 export const logout = async (req, res) => {
   try {
-    const { authId } = req.body;
+    const authId = req.user.id;
 
     const user = await Auth.findByPk(authId);
 

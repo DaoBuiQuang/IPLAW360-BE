@@ -3,10 +3,12 @@ import { Auth } from "../models/authModel.js";
 import { NhomNhanSu } from "../models/nhomNhanSuModel.js";
 import { Sequelize, Op } from "sequelize";
 import { sendGenericNotification } from "../utils/notificationHelper.js";
+import { ACCOUNT_ROLES, isTimesheetOnlyRole } from "../utils/accountRoles.js";
 
 export const getNhanSuBasicList = async (req, res) => {
     try {
         const nhanSuList = await NhanSu.findAll({
+            ...(isTimesheetOnlyRole(req.user?.role) ? { where: { maNhanSu: req.user.maNhanSu } } : {}),
             attributes: ["maNhanSu", "hoTen"] 
         });
         res.status(200).json(nhanSuList || []);
@@ -173,6 +175,9 @@ export const getNhanSuList = async (req, res) => {
 export const getNhanSuById = async (req, res) => {
     try {
         const { maNhanSu } = req.body;
+        if (isTimesheetOnlyRole(req.user?.role) && maNhanSu !== req.user.maNhanSu) {
+            return res.status(403).json({ message: "Bạn chỉ được xem thông tin tài khoản của mình" });
+        }
 
         const nhanSu = await NhanSu.findByPk(maNhanSu, {
             include: [{
@@ -304,7 +309,7 @@ export const updateStaffRole = async (req, res) => {
             });
         }
 
-        const allowedRoles = ["manager", "staff", "admin", "trainee"];
+        const allowedRoles = ACCOUNT_ROLES;
         if (!allowedRoles.includes(role)) {
             return res.status(400).json({
                 success: false,
@@ -340,6 +345,9 @@ export const updateStaffRole = async (req, res) => {
 
         const oldRole = auth.Role;
         auth.Role = role;
+        if (oldRole !== role && (isTimesheetOnlyRole(oldRole) || isTimesheetOnlyRole(role))) {
+            auth.Token = null;
+        }
         await auth.save();
 
         return res.status(200).json({
