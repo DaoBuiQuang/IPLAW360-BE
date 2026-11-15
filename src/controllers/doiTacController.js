@@ -26,6 +26,7 @@ export const getPartners = async (req, res) => {
             ],
             limit: pageSize,
             offset: offset,
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
         });
 
         if (!partners.length) {
@@ -85,7 +86,7 @@ export const getAllPartners = async (req, res) => {
         const partners = await DoiTac.findAll({
             where: whereCondition,
             attributes: ["id", "maDoiTac", "tenDoiTac", "maQuocGia", "diaChi", "sdt", "nguoiLienHe", "email", "moTa"],
-            order: [["tenDoiTac", "ASC"]],
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
         });
 
         res.status(200).json(partners);

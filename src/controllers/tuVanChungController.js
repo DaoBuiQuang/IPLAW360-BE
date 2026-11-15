@@ -49,7 +49,7 @@ export const getGeneralAdvices_VN = async (req, res) => {
             ],
             limit: pageSize,
             offset: offset,
-            order: [["id", "DESC"]],
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
         });
 
         if (!generalAdvices.length) {
@@ -136,7 +136,7 @@ export const getGeneralAdvices_KH = async (req, res) => {
             ],
             limit: pageSize,
             offset: offset,
-            order: [["id", "DESC"]],
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
         });
 
         if (!generalAdvices.length) {
@@ -347,7 +347,7 @@ export const getGeneralAdviceDetail_VN = async (req, res) => {
         const vuViecs = await VuViec.findAll({
             where: { maHoSo: plainGL.maHoSo },
             attributes: ["id","tenVuViec","moTa","deadline","softDeadline","xuatBill","ngayXuatBill","maNguoiXuatBill","soTien","loaiTienTe","isMainCase","maNguoiXuLy", "maHoSo"],
-            order: [["id","DESC"]]
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]]
         });
 
         plainGL.vuViecs = vuViecs.map(v => v.toJSON());
@@ -387,7 +387,7 @@ export const getGeneralAdviceDetail_KH = async (req, res) => {
         const vuViecs = await VuViec.findAll({
             where: { maHoSo: plainGL.maHoSo },
             attributes: ["id","tenVuViec","moTa","deadline","softDeadline","xuatBill","ngayXuatBill","maNguoiXuatBill","soTien","loaiTienTe","isMainCase","maNguoiXuLy",  "maHoSo"],
-            order: [["id","DESC"]]
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]]
         });
 
         plainGL.vuViecs = vuViecs.map(v => v.toJSON());

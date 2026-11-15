@@ -118,7 +118,7 @@ export const getDeNghiThanhToansVN = async (req, res) => {
       // ],
       limit: pageSize,
       offset,
-      order: [["id", "DESC"]],
+      order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
     });
 
     if (!deNghiThanhToans.length) {
@@ -189,7 +189,7 @@ export const getDeNghiThanhToansKH = async (req, res) => {
       // include: [... như trên nếu cần ...],
       limit: pageSize,
       offset,
-      order: [["id", "DESC"]],
+      order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
     });
 
     if (!deNghiThanhToans.length) {
@@ -260,7 +260,7 @@ export const getDeNghiThanhToans = async (req, res) => {
       // include: [... như trên nếu cần ...],
       limit: pageSize,
       offset,
-      order: [["id", "DESC"]],
+      order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
     });
 
     if (!deNghiThanhToans.length) {

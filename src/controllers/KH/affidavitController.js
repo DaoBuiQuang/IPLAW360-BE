@@ -163,7 +163,7 @@ export const getAffidavitList = async (req, res) => {
                     ],
                 },
             ],
-            order: [["createdAt", "DESC"]],
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
             limit: pageSize,
             offset,
         });

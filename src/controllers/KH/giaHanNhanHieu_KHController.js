@@ -66,7 +66,7 @@ export const getAllApplication_GH_KH = async (req, res) => {
                     ],
                 },
             ],
-            order: [["createdAt", "DESC"]],
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
             limit: pageSize,
             offset,
         });

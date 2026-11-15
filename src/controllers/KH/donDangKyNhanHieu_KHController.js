@@ -19,6 +19,7 @@ import { GCN_NH_KH } from "../../models/GCN_NH_KHModel.js";
 import { GiayUyQuyen } from "../../models/GiayUyQuyenModel.js";
 import { DonSuaDoi_NH_KH } from "../../models/KH_SuaDoi_NH/donSuaDoiNH_KHModel.js";
 import { DonTachNH_KH } from "../../models/index.js";
+import { resolveGCNDatesForSave } from "../../utils/gcnDateHelper.js";
 const tinhHanXuLy = (app) => {
     let duKienDate = null;
 
@@ -227,10 +228,16 @@ export const getAllApplication_KH = async (req, res) => {
             ]);
             order.push(["hanXuLy", "ASC"]);
         }
-        if (sortByUpdatedAt) {
-            order.push(["updatedAt", "DESC"]);
-        } else if (sortByCreatedAt) {
-            order.push(["createdAt", "DESC"]);
+        if (!sortByHanTraLoi && !sortByHanXuLy) {
+            order.push([
+                Sequelize.literal("CASE WHEN COALESCE(`DonDangKyNhanHieu_KH`.`donGoc`, 0) = 1 THEN 1 ELSE 0 END"),
+                "ASC",
+            ]);
+            if (sortByCreatedAt && !sortByUpdatedAt) {
+                order.push(["createdAt", "DESC"], ["updatedAt", "DESC"]);
+            } else {
+                order.push(["updatedAt", "DESC"], ["createdAt", "DESC"]);
+            }
         }
 
         // Bổ sung field cần thiết
@@ -517,12 +524,20 @@ export const createApplication_KH = async (req, res) => {
             // donData.ngayGuiBangChoKhachHang
         ) {
             const actualMaHoSo = maHoSo || donData.maHoSoVuViec || newDon.maHoSo || newDon.maHoSoVuViec || null;
+            const effectiveNgayNopDon = newDon.ngayNopDon || donData.ngayNopDon || null;
+            const resolvedGCNDates = resolveGCNDatesForSave({
+                ngayNopDon: effectiveNgayNopDon,
+                ngayHetHanBang: donData.ngayHetHanBang,
+                hanGiaHan: donData.hanGiaHan,
+            });
             const gcnData = {
                 maDonDangKy: newDon.maDonDangKy,
                 soBang: donData.soBang || null,
                 quyetDinhSo: donData.quyetDinhSo || null,
+                ngayNopDon: effectiveNgayNopDon,
                 ngayCapBang: donData.ngayCapBang || null,
-                ngayHetHanBang: donData.ngayHetHanBang || null,
+                ngayHetHanBang: resolvedGCNDates.ngayHetHanBang,
+                hanGiaHan: resolvedGCNDates.hanGiaHan,
                 ngayGuiBangChoKhachHang: donData.ngayGuiBangChoKhachHang || null,
                 idKhachHang: donData.idKhachHang || null,
                 idDoiTac: donData.idDoiTac || null,
@@ -737,18 +752,25 @@ export const updateApplication_KH = async (req, res) => {
             if (don.idGCN_NH) {
                 const gcn = await GCN_NH_KH.findByPk(don.idGCN_NH, { transaction: t });
                 if (gcn) {
+                    const effectiveNgayNopDon = don.ngayNopDon || gcn.ngayNopDon;
+                    const resolvedGCNDates = resolveGCNDatesForSave({
+                        ngayNopDon: effectiveNgayNopDon,
+                        ngayHetHanBang: updateData.ngayHetHanBang !== undefined ? updateData.ngayHetHanBang : gcn.ngayHetHanBang,
+                        hanGiaHan: updateData.hanGiaHan !== undefined ? updateData.hanGiaHan : gcn.hanGiaHan,
+                    });
                     await gcn.update({
                         soBang: updateData.soBang || gcn.soBang,
                         quyetDinhSo: updateData.quyetDinhSo || gcn.quyetDinhSo,
                         ngayCapBang: updateData.ngayCapBang || gcn.ngayCapBang,
-                        ngayHetHanBang: updateData.ngayHetHanBang || gcn.ngayHetHanBang,
+                        ngayHetHanBang: resolvedGCNDates.ngayHetHanBang,
+                        hanGiaHan: resolvedGCNDates.hanGiaHan,
                         ngayGuiBangChoKhachHang: updateData.ngayGuiBangChoKhachHang || gcn.ngayGuiBangChoKhachHang,
                         maNhanHieu: updateData.maNhanHieu || gcn.maNhanHieu,
                         trangThaiDon: updateData.trangThaiDon || gcn.trangThaiDon,
                         soDon: don.soDon,
                         idKhachHang: don.idKhachHang,
                         idDoiTac: don.idDoiTac,
-                        ngayNopDon: don.ngayNopDon,
+                        ngayNopDon: effectiveNgayNopDon,
                         clientsRef: don.clientsRef,
                         maHoSo: actualMaHoSo || gcn.maHoSo
                     }, { transaction: t });
@@ -756,12 +778,18 @@ export const updateApplication_KH = async (req, res) => {
                 idGCN_NH = don.idGCN_NH;
             } else {
                 // 🔹 Nếu chưa có thì tạo mới
+                const resolvedGCNDates = resolveGCNDatesForSave({
+                    ngayNopDon: don.ngayNopDon,
+                    ngayHetHanBang: updateData.ngayHetHanBang,
+                    hanGiaHan: updateData.hanGiaHan,
+                });
                 const newGCN = await GCN_NH_KH.create({
                     maDonDangKy: maDonDangKy,
                     soBang: updateData.soBang || null,
                     quyetDinhSo: updateData.quyetDinhSo || null,
                     ngayCapBang: updateData.ngayCapBang || null,
-                    ngayHetHanBang: updateData.ngayHetHanBang || null,
+                    ngayHetHanBang: resolvedGCNDates.ngayHetHanBang,
+                    hanGiaHan: resolvedGCNDates.hanGiaHan,
                     ngayGuiBangChoKhachHang: updateData.ngayGuiBangChoKhachHang || null,
                     idKhachHang: don.idKhachHang,
                     idDoiTac: don.idDoiTac,

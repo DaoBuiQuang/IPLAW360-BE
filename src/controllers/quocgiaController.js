@@ -15,13 +15,7 @@ export const getCountryBasicList = async (req, res) => {
         const countries = await QuocGia.findAll({
             attributes: ["maQuocGia", "tenQuocGia"],
             where: whereClause,
-            order: [
-                [literal(`CASE 
-    WHEN "maQuocGia" IN ('VN', 'KH', 'LA', 'CN') THEN 0 
-    ELSE 1 
-  END`), "ASC"],
-                ["maQuocGia", "ASC"]
-            ]
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]]
 
         });
 
@@ -46,13 +40,7 @@ export const getCountryFullList = async (req, res) => {
 
         const countries = await QuocGia.findAll({
             where: whereClause,
-            order: [
-                [literal(`CASE 
-    WHEN "maQuocGia" IN ('VN', 'KH', 'LA', 'CN') THEN 0 
-    ELSE 1 
-  END`), "ASC"],
-                ["maQuocGia", "ASC"]
-            ]
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]]
 
         });
 

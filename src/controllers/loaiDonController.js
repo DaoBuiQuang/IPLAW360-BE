@@ -28,7 +28,7 @@ export const getAllLoaiDon = async (req, res) => {
 
         const list = await LoaiDon.findAll({
             where: whereClause,
-            order: [[Sequelize.literal('CAST(maLoaiDon AS UNSIGNED)'), 'ASC']]
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]]
         });
 
         if (list.length === 0) {

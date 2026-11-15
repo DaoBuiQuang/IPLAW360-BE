@@ -263,7 +263,8 @@ function buildGetVuViecsDaXuatBill({
         order: [
           [literal(`CASE WHEN ngayXuatBill IS NULL THEN 1 ELSE 0 END`), "ASC"],
           ["ngayXuatBill", "DESC"],
-          ["id", "DESC"],
+          ["updatedAt", "DESC"],
+          ["createdAt", "DESC"],
         ],
         limit: Number(pageSize),
         offset: Number(offset),

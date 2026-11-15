@@ -194,6 +194,9 @@ export const getAllApplication_KD_VN = async (req, res) => {
             order.push([Sequelize.literal('hanXuLy IS NULL'), 'ASC']);
             order.push(['hanXuLy', 'ASC']);
         }
+        if (!sortByHanTraLoi && !sortByHanXuLy) {
+            order.push(["updatedAt", "DESC"], ["createdAt", "DESC"]);
+        }
 
         // const totalItems = await DonDangKyNhanHieu_KH.count({ where: whereCondition });
 

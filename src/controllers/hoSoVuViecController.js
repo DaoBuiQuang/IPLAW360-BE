@@ -103,7 +103,7 @@ export const searchCases = async (req, res) => {
             ],
             limit: pageSize,
             offset: offset,
-            order: [["maHoSoVuViec", "ASC"]]
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]]
         });
         if (!cases.length) {
             return res.status(404).json({ message: "Không tìm thấy vụ việc nào" });

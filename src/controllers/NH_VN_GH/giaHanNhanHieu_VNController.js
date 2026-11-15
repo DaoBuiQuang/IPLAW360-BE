@@ -294,7 +294,7 @@ export const getAllApplication_GH_VN = async (req, res) => {
                     ],
                 },
             ],
-            order: [["createdAt", "DESC"]],
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
             limit: pageSize,
             offset,
         });
