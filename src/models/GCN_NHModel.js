@@ -26,7 +26,7 @@ export const GCN_NH = sequelize.define("GCN_NH", {
     },
     idKhachHang: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
         references: {
             model: KhachHangCuoi,
             key: "id",
@@ -67,7 +67,7 @@ export const GCN_NH = sequelize.define("GCN_NH", {
     },
     maNhanHieu: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
         references: {
             model: NhanHieu,
             key: "maNhanHieu",

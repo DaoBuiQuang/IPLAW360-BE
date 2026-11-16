@@ -307,6 +307,9 @@ export const syncDatabase = async () => {
         await sequelize.sync();
         console.log("✅ Database synchronized with all models");
 
+        await ensureColumnNullable(GCN_NH.getTableName(), "idKhachHang", "INT");
+        await ensureColumnNullable(GCN_NH.getTableName(), "maNhanHieu", "INT");
+
         // Đảm bảo lại các cột trên 4 bảng tờ khai (trong trường hợp bảng vừa được tạo mới bởi sync)
         await ensureColumnNullable("DonSuaDoi_NH_VN", "maDonDangKy", "VARCHAR(255)");
         await ensureColumnNullable("DonCQSH_VN", "maDonDangKy", "VARCHAR(255)");
