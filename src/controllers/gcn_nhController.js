@@ -26,6 +26,7 @@ import {
     resolveGCNDatesForSave,
     resolveNgayHetHanBangForRead,
     resolveHanGiaHanForRead,
+    computeHanNopTuyenThe,
 } from "../utils/gcnDateHelper.js";
 
 // Helper for token-based case-insensitive multi-word search
@@ -536,6 +537,10 @@ export const getGCN_NHsCAM = async (req, res) => {
                 "ghiChu",
                 "dsNhomSPDV",
                 "hanNopTuyenThe",
+                "ngayNopYCTuyenThe",
+                "loaiTuyenThe",
+                "ngayGhiNhanTuyenThe",
+                "trangThaiBang",
                 "hanGiaHan",
                 "ngayHetHanBang",
                 "anhBang",
@@ -603,7 +608,11 @@ export const getGCN_NHsCAM = async (req, res) => {
                 ngayCapBang: gcn_nh.ngayCapBang,
                 ghiChu: gcn_nh.ghiChu,
                 dsNhomSPDV: gcn_nh.dsNhomSPDV,
+                trangThaiBang: gcn_nh.trangThaiBang || null,
                 hanNopTuyenThe: gcn_nh.hanNopTuyenThe,
+                ngayNopYCTuyenThe: gcn_nh.ngayNopYCTuyenThe || null,
+                loaiTuyenThe: gcn_nh.loaiTuyenThe || null,
+                ngayGhiNhanTuyenThe: gcn_nh.ngayGhiNhanTuyenThe || null,
                 hanGiaHan: resolveHanGiaHanForRead(gcn_nh.hanGiaHan, gcn_nh.ngayNopDon),
                 ngayHetHanBang: resolveNgayHetHanBangForRead(gcn_nh.ngayHetHanBang, gcn_nh.ngayNopDon)
             };
@@ -646,6 +655,10 @@ export const getGCN_NHsCAM_SD = async (req, res) => {
                 "ghiChu",
                 "dsNhomSPDV",
                 "hanNopTuyenThe",
+                "ngayNopYCTuyenThe",
+                "loaiTuyenThe",
+                "ngayGhiNhanTuyenThe",
+                "trangThaiBang",
                 "hanGiaHan",
                 "ngayHetHanBang",
                 "anhBang",
@@ -713,7 +726,11 @@ export const getGCN_NHsCAM_SD = async (req, res) => {
                 ngayCapBang: gcn_nh.ngayCapBang,
                 ghiChu: gcn_nh.ghiChu,
                 dsNhomSPDV: gcn_nh.dsNhomSPDV,
+                trangThaiBang: gcn_nh.trangThaiBang || null,
                 hanNopTuyenThe: gcn_nh.hanNopTuyenThe,
+                ngayNopYCTuyenThe: gcn_nh.ngayNopYCTuyenThe || null,
+                loaiTuyenThe: gcn_nh.loaiTuyenThe || null,
+                ngayGhiNhanTuyenThe: gcn_nh.ngayGhiNhanTuyenThe || null,
                 hanGiaHan: resolveHanGiaHanForRead(gcn_nh.hanGiaHan, gcn_nh.ngayNopDon),
                 ngayHetHanBang: resolveNgayHetHanBangForRead(gcn_nh.ngayHetHanBang, gcn_nh.ngayNopDon)
             };
@@ -974,6 +991,9 @@ export const getGCN_NH_CAMDetail = async (req, res) => {
                 "anhBang",
                 "hanGiaHan",
                 "hanNopTuyenThe",
+                "ngayNopYCTuyenThe",
+                "loaiTuyenThe",
+                "ngayGhiNhanTuyenThe",
                 "idKhachHang",
                 "idDoiTac",
                 "maQuocGia",
@@ -1088,6 +1108,10 @@ export const getGCN_NH_CAMDetail = async (req, res) => {
             linkScan: gcn_nh.anhBang || null,
             hanGiaHan: resolveHanGiaHanForRead(gcn_nh.hanGiaHan, gcn_nh.ngayNopDon),
             hanNopTuyenThe: gcn_nh.hanNopTuyenThe,
+            ngayNopYCTuyenThe: gcn_nh.ngayNopYCTuyenThe || null,
+            loaiTuyenThe: gcn_nh.loaiTuyenThe || null,
+            ngayGhiNhanTuyenThe: gcn_nh.ngayGhiNhanTuyenThe || null,
+            trangThaiBang: gcn_nh.trangThaiBang || null,
             idKhachHang: gcn_nh.idKhachHang,
             idDoiTac: gcn_nh.idDoiTac,
             maNhanHieu: gcn_nh.maNhanHieu,
@@ -1285,22 +1309,30 @@ export const addGCN_NH_Cam = async (req, res) => {
             hanGiaHan,
             hanGiaHanBang,
             hanNopTuyenThe,
+            ngayNopYCTuyenThe,
+            loaiTuyenThe,
+            ngayGhiNhanTuyenThe,
+            trangThaiBang,
+            quyetDinhSo,
+            clientsRef,
+            clientRef,
+            anhBang,
             anhBangBase64, // ảnh được gửi từ FE dạng base64
             vuViecs,
             maNhanSuCapNhap,
             idGUQ
         } = req.body;
 
-        // ✅ 1. Kiểm tra dữ liệu đầu vào
-        if (!soBang || !maNhanHieu) {
+        // ✅ 1. Kiểm tra dữ liệu đầu vào (chỉ bắt buộc số bằng)
+        if (!soBang || String(soBang).trim() === "") {
             await transaction.rollback();
             return res.status(400).json({
-                message: "Thiếu thông tin bắt buộc: số bằng hoặc mã nhãn hiệu!",
+                message: "Thiếu thông tin bắt buộc: số bằng!",
             });
         }
 
         // ✅ 2. Kiểm tra trùng số bằng
-        const existed = await GCN_NH_KH.findOne({ where: { soBang } });
+        const existed = await GCN_NH_KH.findOne({ where: { soBang }, transaction });
         if (existed) {
             await transaction.rollback();
             return res.status(400).json({
@@ -1308,16 +1340,20 @@ export const addGCN_NH_Cam = async (req, res) => {
             });
         }
 
-        // ✅ 3. Kiểm tra hoặc tạo mới nhãn hiệu
-        let nhanHieu = await NhanHieu.findOne({ where: { maNhanHieu } });
-        if (!nhanHieu) {
-            nhanHieu = await NhanHieu.create(
-                {
-                    maNhanHieu,
-                    tenNhanHieu: tenNhanHieu || null,
-                },
-                { transaction }
-            );
+        // ✅ 3. Kiểm tra hoặc tạo mới nhãn hiệu (nếu có maNhanHieu)
+        let resolvedMaNhanHieu = null;
+        if (maNhanHieu !== undefined && maNhanHieu !== null && String(maNhanHieu).trim() !== "") {
+            let nhanHieu = await NhanHieu.findOne({ where: { maNhanHieu }, transaction });
+            if (!nhanHieu) {
+                nhanHieu = await NhanHieu.create(
+                    {
+                        maNhanHieu,
+                        tenNhanHieu: tenNhanHieu || null,
+                    },
+                    { transaction }
+                );
+            }
+            resolvedMaNhanHieu = nhanHieu.maNhanHieu;
         }
 
         // ✅ 4. Tạo mới văn bằng (GCN_NH_KH)
@@ -1327,24 +1363,35 @@ export const addGCN_NH_Cam = async (req, res) => {
             hanGiaHan: hanGiaHan ?? hanGiaHanBang,
         });
 
+        const resolvedHanNopTuyenThe =
+            (hanNopTuyenThe && String(hanNopTuyenThe).trim() !== "")
+                ? hanNopTuyenThe
+                : computeHanNopTuyenThe(ngayGhiNhanTuyenThe || ngayCapBang);
+
         const newGCN = await GCN_NH_KH.create(
             {
-                soBang,
-                soDon,
-                maHoSo,
-                ghiChu,
-                dsNhomSPDV,
+                soBang: String(soBang).trim(),
+                soDon: soDon || null,
+                maHoSo: maHoSo || null,
+                ghiChu: ghiChu || null,
+                dsNhomSPDV: dsNhomSPDV || null,
                 ngayNopDon: ngayNopDon || null,
                 ngayCapBang: ngayCapBang || null,
                 ngayHetHanBang: resolvedDatesCam.ngayHetHanBang,
-                chiTietNhomSPDV,
+                chiTietNhomSPDV: chiTietNhomSPDV || null,
                 hanGiaHan: resolvedDatesCam.hanGiaHan,
-                hanNopTuyenThe: hanNopTuyenThe || null,
+                hanNopTuyenThe: resolvedHanNopTuyenThe,
+                ngayNopYCTuyenThe: ngayNopYCTuyenThe || null,
+                loaiTuyenThe: loaiTuyenThe || null,
+                ngayGhiNhanTuyenThe: ngayGhiNhanTuyenThe || null,
+                trangThaiBang: trangThaiBang || null,
+                quyetDinhSo: quyetDinhSo || null,
+                clientsRef: clientsRef ?? clientRef ?? null,
                 maQuocGia: "KH", // ✅ Cố định cho Campuchia
                 idKhachHang: idKhachHang || null,
                 idDoiTac: idDoiTac || null,
-                maNhanHieu: nhanHieu.maNhanHieu,
-                anhBangBase64: anhBangBase64 || null,
+                maNhanHieu: resolvedMaNhanHieu,
+                anhBang: anhBang ?? anhBangBase64 ?? null,
                 mauSacNH: mauSacNH || null,
                 idGUQ: idGUQ || null,
             },
@@ -1439,8 +1486,15 @@ export const editGCN_NH_CAM = async (req, res) => {
             chiTietNhomSPDV,
             mauSacNH,
             linkAnh,
+            anhBang,
+            anhBangBase64,
             hanGiaHan,
+            hanGiaHanBang,
             hanNopTuyenThe,
+            ngayNopYCTuyenThe,
+            loaiTuyenThe,
+            ngayGhiNhanTuyenThe,
+            trangThaiBang,
             idKhachHang,
             idDoiTac,
             maNhanHieu,
@@ -1453,42 +1507,77 @@ export const editGCN_NH_CAM = async (req, res) => {
         } = req.body;
 
         if (!id) {
+            await t.rollback();
             return res.status(400).json({ message: "Thiếu ID văn bằng cần chỉnh sửa" });
         }
 
-        const record = await GCN_NH_KH.findByPk(id);
+        const record = await GCN_NH_KH.findByPk(id, { transaction: t });
         if (!record) {
+            await t.rollback();
             return res.status(404).json({ message: "Không tìm thấy văn bằng cần chỉnh sửa" });
         }
 
         // ✅ Cập nhật thông tin văn bằng
+        const incomingHanGiaHan = hanGiaHan !== undefined ? hanGiaHan : hanGiaHanBang;
         const resolvedDatesCamEdit = resolveGCNDatesForSave({
             ngayNopDon: ngayNopDon !== undefined ? ngayNopDon : record.ngayNopDon,
             ngayHetHanBang: ngayHetHanBang !== undefined ? ngayHetHanBang : record.ngayHetHanBang,
-            hanGiaHan: hanGiaHan !== undefined ? hanGiaHan : record.hanGiaHan,
+            hanGiaHan: incomingHanGiaHan !== undefined ? incomingHanGiaHan : record.hanGiaHan,
         });
+
+        const hasManualHanNopTuyenThe =
+            hanNopTuyenThe !== undefined &&
+            hanNopTuyenThe !== null &&
+            String(hanNopTuyenThe).trim() !== "";
+        const effectiveNgayGhiNhanTuyenThe =
+            ngayGhiNhanTuyenThe !== undefined ? (ngayGhiNhanTuyenThe || null) : record.ngayGhiNhanTuyenThe;
+        const isNgayGhiNhanChanged =
+            ngayGhiNhanTuyenThe !== undefined &&
+            effectiveNgayGhiNhanTuyenThe !== record.ngayGhiNhanTuyenThe &&
+            Boolean(effectiveNgayGhiNhanTuyenThe);
+
+        let resolvedHanNopTuyenThe = hasManualHanNopTuyenThe ? hanNopTuyenThe : record.hanNopTuyenThe;
+        if (
+            !hasManualHanNopTuyenThe &&
+            (isNgayGhiNhanChanged || (!resolvedHanNopTuyenThe && (effectiveNgayGhiNhanTuyenThe || ngayCapBang || record.ngayCapBang)))
+        ) {
+            const baseTuyenTheDate =
+                effectiveNgayGhiNhanTuyenThe ||
+                (ngayCapBang !== undefined ? ngayCapBang : record.ngayCapBang);
+            resolvedHanNopTuyenThe = computeHanNopTuyenThe(baseTuyenTheDate) ?? resolvedHanNopTuyenThe;
+        }
+
+        const normalizeOptionalInt = (val, currentVal) => {
+            if (val === undefined) return currentVal;
+            if (val === null || String(val).trim() === "") return null;
+            return val;
+        };
 
         await record.update(
             {
-                soBang,
-                soDon,
-                maHoSo,
-                ngayNopDon,
-                ngayCapBang,
-                ghiChu,
-                dsNhomSPDV,
-                chiTietNhomSPDV,
-                mauSacNH,
-                anhBang: linkAnh,
+                soBang: soBang !== undefined ? soBang : record.soBang,
+                soDon: soDon !== undefined ? (soDon || null) : record.soDon,
+                maHoSo: maHoSo !== undefined ? (maHoSo || null) : record.maHoSo,
+                ngayNopDon: ngayNopDon !== undefined ? (ngayNopDon || null) : record.ngayNopDon,
+                ngayCapBang: ngayCapBang !== undefined ? (ngayCapBang || null) : record.ngayCapBang,
+                ghiChu: ghiChu !== undefined ? ghiChu : record.ghiChu,
+                dsNhomSPDV: dsNhomSPDV !== undefined ? dsNhomSPDV : record.dsNhomSPDV,
+                chiTietNhomSPDV: chiTietNhomSPDV !== undefined ? chiTietNhomSPDV : record.chiTietNhomSPDV,
+                mauSacNH: mauSacNH !== undefined ? mauSacNH : record.mauSacNH,
+                anhBang: anhBang !== undefined ? anhBang : (anhBangBase64 !== undefined ? anhBangBase64 : (linkAnh !== undefined ? linkAnh : record.anhBang)),
                 hanGiaHan: resolvedDatesCamEdit.hanGiaHan,
-                hanNopTuyenThe,
-                idKhachHang,
-                idDoiTac,
-                maNhanHieu,
-                maQuocGia,
-                quyetDinhSo,
+                hanNopTuyenThe: resolvedHanNopTuyenThe || null,
+                ngayNopYCTuyenThe: ngayNopYCTuyenThe !== undefined ? (ngayNopYCTuyenThe || null) : record.ngayNopYCTuyenThe,
+                loaiTuyenThe: loaiTuyenThe !== undefined ? (loaiTuyenThe || null) : record.loaiTuyenThe,
+                ngayGhiNhanTuyenThe: effectiveNgayGhiNhanTuyenThe,
+                trangThaiBang: trangThaiBang !== undefined ? (trangThaiBang || null) : record.trangThaiBang,
+                idKhachHang: normalizeOptionalInt(idKhachHang, record.idKhachHang),
+                idDoiTac: normalizeOptionalInt(idDoiTac, record.idDoiTac),
+                maNhanHieu: normalizeOptionalInt(maNhanHieu, record.maNhanHieu),
+                maQuocGia: maQuocGia !== undefined ? maQuocGia : record.maQuocGia,
+                quyetDinhSo: quyetDinhSo !== undefined ? quyetDinhSo : record.quyetDinhSo,
                 ngayHetHanBang: resolvedDatesCamEdit.ngayHetHanBang,
-                idGUQ
+                idGUQ: normalizeOptionalInt(idGUQ, record.idGUQ),
             },
             { transaction: t }
         );
@@ -1613,6 +1702,9 @@ export const editGCN_NH_CAM = async (req, res) => {
                 "anhBang",
                 "hanGiaHan",
                 "hanNopTuyenThe",
+                "ngayNopYCTuyenThe",
+                "loaiTuyenThe",
+                "ngayGhiNhanTuyenThe",
                 "idKhachHang",
                 "idDoiTac",
                 "maQuocGia",

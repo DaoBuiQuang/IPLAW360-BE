@@ -872,17 +872,17 @@ export const getAllApplicationTD_KH = async (req, res) => {
         const order = [];
         if (sortByHanTraLoi) {
             order.push([
-                Sequelize.literal(`CASE WHEN trangThaiVuViec = '5' THEN 1 ELSE 0 END`),
+                Sequelize.literal("CASE WHEN `DonDangKyNhanHieu_KH`.`trangThaiVuViec` = '5' THEN 1 ELSE 0 END"),
                 "ASC",
             ]);
-            order.push(["hanTraLoi", "ASC"]);
+            order.push([Sequelize.col("DonDangKyNhanHieu_KH.hanTraLoi"), "ASC"]);
         }
         if (sortByHanXuLy) {
             order.push([
-                Sequelize.literal(`CASE WHEN trangThaiVuViec = '5' THEN 1 ELSE 0 END`),
+                Sequelize.literal("CASE WHEN `DonDangKyNhanHieu_KH`.`trangThaiVuViec` = '5' THEN 1 ELSE 0 END"),
                 "ASC",
             ]);
-            order.push(["hanXuLy", "ASC"]);
+            order.push([Sequelize.col("DonDangKyNhanHieu_KH.hanXuLy"), "ASC"]);
         }
 
         // Bổ sung field cần thiết

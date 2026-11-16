@@ -7,6 +7,7 @@ import cron from 'node-cron';
 import { Sequelize } from "sequelize";
 import { HoSo_VuViec } from "../../models/hoSoVuViecModel.js";
 import { KhachHangCuoi } from "../../models/khanhHangCuoiModel.js";
+import { DoiTac } from "../../models/doiTacModel.js";
 import { DonDangKyNhanHieu_KH } from "../../models/KH/donDangKyNhanHieu_KHModel.js";
 import { LichSuThamDinh_KH } from "../../models/KH/lichSuThamDinh_KHModel.js";
 import { DonDK_SPDV_KH } from "../../models/KH/donDK_SPDVModel_KHModel.js";
@@ -65,6 +66,9 @@ export const getAllApplication_KD_VN = async (req, res) => {
         const {
             maSPDVList,
             tenNhanHieu,
+            brandName,
+            customerName,
+            partnerName,
             trangThaiDon,
             searchText,
             fields = [],
@@ -72,6 +76,10 @@ export const getAllApplication_KD_VN = async (req, res) => {
             pageIndex = 1,
             pageSize = 20
         } = req.body;
+
+        const effectiveBrandName = String(brandName || tenNhanHieu || "").trim();
+        const effectiveCustomerName = String(customerName || "").trim();
+        const effectivePartnerName = String(partnerName || "").trim();
 
         if (!fields.includes("maDonDangKy")) {
             fields.push("maDonDangKy");
@@ -200,7 +208,7 @@ export const getAllApplication_KD_VN = async (req, res) => {
 
         // const totalItems = await DonDangKyNhanHieu_KH.count({ where: whereCondition });
 
-        const {count: totalItems, rows:applications} = await DonDangKyNhanHieu_KH.findAll({
+        const { count: totalItems, rows: applications } = await DonDangKyNhanHieu_KH.findAndCountAll({
             where: whereCondition,
             include: [
                 {
@@ -223,13 +231,36 @@ export const getAllApplication_KD_VN = async (req, res) => {
                     model: NhanHieu,
                     as: 'nhanHieu',
                     attributes: ['tenNhanHieu'],
-                    required: !!tenNhanHieu,
-                    where: tenNhanHieu ? { tenNhanHieu: { [Op.like]: `%${tenNhanHieu}%` } } : undefined
+                    required: !!effectiveBrandName,
+                    where: effectiveBrandName ? { tenNhanHieu: { [Op.like]: `%${effectiveBrandName}%` } } : undefined
+                },
+                {
+                    model: KhachHangCuoi,
+                    as: 'khachHang',
+                    attributes: ['tenKhachHang'],
+                    required: !!effectiveCustomerName,
+                    where: effectiveCustomerName ? { tenKhachHang: { [Op.like]: `%${effectiveCustomerName}%` } } : undefined
+                },
+                {
+                    model: DoiTac,
+                    as: 'doitac',
+                    attributes: ['tenDoiTac', 'maDoiTac'],
+                    required: !!effectivePartnerName,
+                    where: effectivePartnerName
+                        ? {
+                            [Op.or]: [
+                                { tenDoiTac: { [Op.like]: `%${effectivePartnerName}%` } },
+                                { maDoiTac: { [Op.like]: `%${effectivePartnerName}%` } }
+                            ]
+                        }
+                        : undefined
                 }
             ],
-            limit: pageSize,
-            offset: offset,
-            order
+            limit: Number(pageSize) || 20,
+            offset: ((Number(pageIndex) || 1) - 1) * (Number(pageSize) || 20),
+            order,
+            subQuery: false,
+            distinct: true
         });
 
         if (!applications || applications.length === 0) {
@@ -241,6 +272,8 @@ export const getAllApplication_KD_VN = async (req, res) => {
             maHoSoVuViec: app => app.maHoSoVuViec,
             soDon: app => app.soDon,
             tenNhanHieu: app => app.nhanHieu?.tenNhanHieu || null,
+            tenKhachHang: app => app.khachHang?.tenKhachHang || null,
+            tenDoiTac: app => app.doitac?.tenDoiTac || null,
             trangThaiDon: app => app.trangThaiDon,
             ngayNopDon: app => app.ngayNopDon,
             ngayHoanThanhHoSoTaiLieu: app => app.ngayHoanThanhHoSoTaiLieu,

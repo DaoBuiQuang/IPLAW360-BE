@@ -89,6 +89,7 @@ export const getAllApplication_KH = async (req, res) => {
 
         if (!fields.includes("maDonDangKy")) fields.push("maDonDangKy");
         if (!fields.includes("donGoc")) fields.push("donGoc");
+        if (!fields.includes("loaiDon")) fields.push("loaiDon");
 
         const offset = (pageIndex - 1) * pageSize;
 
@@ -216,17 +217,17 @@ export const getAllApplication_KH = async (req, res) => {
         if (sortByHanTraLoi) {
             // Đưa đơn đã đóng xuống cuối
             order.push([
-                Sequelize.literal(`CASE WHEN trangThaiVuViec = '5' THEN 1 ELSE 0 END`),
+                Sequelize.literal("CASE WHEN `DonDangKyNhanHieu_KH`.`trangThaiVuViec` = '5' THEN 1 ELSE 0 END"),
                 "ASC",
             ]);
-            order.push(["hanTraLoi", "ASC"]);
+            order.push([Sequelize.col("DonDangKyNhanHieu_KH.hanTraLoi"), "ASC"]);
         }
         if (sortByHanXuLy) {
             order.push([
-                Sequelize.literal(`CASE WHEN trangThaiVuViec = '5' THEN 1 ELSE 0 END`),
+                Sequelize.literal("CASE WHEN `DonDangKyNhanHieu_KH`.`trangThaiVuViec` = '5' THEN 1 ELSE 0 END"),
                 "ASC",
             ]);
-            order.push(["hanXuLy", "ASC"]);
+            order.push([Sequelize.col("DonDangKyNhanHieu_KH.hanXuLy"), "ASC"]);
         }
         if (!sortByHanTraLoi && !sortByHanXuLy) {
             order.push([
@@ -327,6 +328,7 @@ export const getAllApplication_KH = async (req, res) => {
             tenNhanHieu: (app) => app.nhanHieu?.tenNhanHieu || null,
             tenKhachHang: (app) => app.khachHang?.tenKhachHang || null,
             tenDoiTac: (app) => app.doitac?.tenDoiTac || null,
+            tinhTrangDon: (app) => app.trangThaiDon,
             trangThaiDon: (app) => app.trangThaiDon,
             ngayNopDon: (app) => app.ngayNopDon,
             ngayHoanThanhHoSoTaiLieu: (app) => app.ngayHoanThanhHoSoTaiLieu,
@@ -362,6 +364,20 @@ export const getAllApplication_KH = async (req, res) => {
             donGoc: (app) => app.donGoc,
         };
 
+        const maDonIds = applications.map((app) => app.maDonDangKy).filter(Boolean);
+        let pendingSuaDoiSet = new Set();
+        if (maDonIds.length > 0) {
+            const pendingSDs = await DonSuaDoi_NH_KH.findAll({
+                where: {
+                    maDonDangKyGoc: { [Op.in]: maDonIds },
+                    duocGhiNhanSuaDoi: { [Op.not]: true },
+                },
+                attributes: ["maDonDangKyGoc"],
+                raw: true,
+            });
+            pendingSuaDoiSet = new Set(pendingSDs.map((sd) => sd.maDonDangKyGoc));
+        }
+
         const result = applications.map((app) => {
             const row = {};
             fields.forEach((field) => {
@@ -369,6 +385,14 @@ export const getAllApplication_KH = async (req, res) => {
                     row[field] = fieldMap[field](app);
                 }
             });
+
+            row.loaiDon = app.loaiDon ?? 1;
+            row.donGoc = app.donGoc;
+            row.tinhTrangDon = app.trangThaiDon;
+            row.trangThaiDon = app.trangThaiDon;
+            row.trangThaiVuViec = app.trangThaiVuViec;
+            row.dangSuaDoi = pendingSuaDoiSet.has(app.maDonDangKy);
+
             return row;
         });
 
@@ -508,6 +532,7 @@ export const createApplication_KH = async (req, res) => {
         }
         const newDon = await DonDangKyNhanHieu_KH.create({
             ...donData,
+            loaiDon: donData.loaiDon || 1,
             maDonDangKy: maDonDangKy,
             maHoSoVuViec: maHoSo,
             maHoSo: maHoSo,
@@ -1245,7 +1270,7 @@ export const getFullApplicationDetail_KH = async (req, res) => {
 
         // 1. Đơn sửa đổi của chính đơn KH hiện tại (nếu là loại đơn sửa đổi)
         if (plainDon.loaiDon === 2) {
-            const donSuaDoiHienTai = await DonSuaDoi_NH_VN.findOne({
+            const donSuaDoiHienTai = await DonSuaDoi_NH_KH.findOne({
                 where: { maDonDangKy: plainDon.maDonDangKy },
             });
             if (donSuaDoiHienTai) {

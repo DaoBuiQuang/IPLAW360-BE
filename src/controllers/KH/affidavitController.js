@@ -7,6 +7,7 @@ import { KhachHangCuoi } from "../../models/khanhHangCuoiModel.js";
 import { DoiTac } from "../../models/doiTacModel.js";
 import { TaiLieuAffidavit } from "../../models/KH/taiLieuAffidavitModel.js";
 export const addAffidavit = async (req, res) => {
+    const transaction = await Affidavit.sequelize.transaction();
     try {
         const {
             soAffidavit,
@@ -14,6 +15,7 @@ export const addAffidavit = async (req, res) => {
             lanNop,
             ngayNop,
             ngayGhiNhan,
+            loaiTuyenThe,
             ghiChu,
             isAutoImport,
             taiLieus
@@ -21,14 +23,16 @@ export const addAffidavit = async (req, res) => {
 
         // ✅ 1. Kiểm tra đầu vào
         if (!idGCN_NH) {
+            await transaction.rollback();
             return res.status(400).json({
                 message: "Thiếu idGCN_NH — cần liên kết tới văn bằng!",
             });
         }
 
         // ✅ 2. Kiểm tra văn bằng tồn tại
-        const gcn = await GCN_NH_KH.findByPk(idGCN_NH);
+        const gcn = await GCN_NH_KH.findByPk(idGCN_NH, { transaction });
         if (!gcn) {
+            await transaction.rollback();
             return res.status(404).json({
                 message: "Không tìm thấy văn bằng (GCN_NH) tương ứng!",
             });
@@ -38,11 +42,13 @@ export const addAffidavit = async (req, res) => {
         const existingAffidavits = await Affidavit.findAll({
             where: { idGCN_NH },
             order: [["lanNop", "ASC"]],
+            transaction,
         });
 
         if (existingAffidavits.length > 0) {
             const maxLanNop = Math.max(...existingAffidavits.map(a => a.lanNop || 1));
             if (!lanNop || lanNop <= maxLanNop) {
+                await transaction.rollback();
                 return res.status(400).json({
                     message: `Bạn đã nộp tuyên thệ lần ${maxLanNop}. Vui lòng chọn lần ${maxLanNop + 1}.`,
                 });
@@ -50,6 +56,7 @@ export const addAffidavit = async (req, res) => {
         } else {
             // Nếu chưa có lần nào => lần đầu tiên phải là 1
             if (!lanNop || lanNop !== 1) {
+                await transaction.rollback();
                 return res.status(400).json({
                     message: "Lần nộp đầu tiên phải là lần 1.",
                 });
@@ -57,20 +64,24 @@ export const addAffidavit = async (req, res) => {
         }
 
         // ✅ 4. Tạo mới Affidavit
-        const newAffidavit = await Affidavit.create({
-            soAffidavit,
-            idGCN_NH,
-            lanNop,
-            ngayNop: ngayNop || null,
-            ngayGhiNhan: ngayGhiNhan || null,
-            ghiChu: ghiChu || null,
-            isAutoImport: isAutoImport || false,
-        });
+        const newAffidavit = await Affidavit.create(
+            {
+                soAffidavit,
+                idGCN_NH,
+                lanNop,
+                ngayNop: ngayNop || null,
+                ngayGhiNhan: ngayGhiNhan || null,
+                loaiTuyenThe: loaiTuyenThe || null,
+                ghiChu: ghiChu || null,
+                isAutoImport: isAutoImport || false,
+            },
+            { transaction }
+        );
         if (Array.isArray(taiLieus)) {
             for (const tl of taiLieus) {
                 await TaiLieuAffidavit.create(
                     {
-                        idAffidavit: newAffidavit.maDonDangKy,
+                        idAffidavit: newAffidavit.id,
                         tenTaiLieu: tl.tenTaiLieu,
                         trangThai: tl.trangThai,
                         linkTaiLieu: tl.linkTaiLieu || null,
@@ -80,21 +91,26 @@ export const addAffidavit = async (req, res) => {
             }
         }
 
-
-        // ✅ 5. Nếu có ngày ghi nhận thì cập nhật hạn nộp tuyên thệ = +5 năm
+        // ✅ 5. Cập nhật thông tin tuyên thệ & hạn nộp tuyên thệ (+5 năm) lên GCN_NH_KH
+        const gcnUpdateData = {};
+        if (ngayNop !== undefined) gcnUpdateData.ngayNopYCTuyenThe = ngayNop || null;
+        if (loaiTuyenThe !== undefined) gcnUpdateData.loaiTuyenThe = loaiTuyenThe || null;
+        if (ngayGhiNhan !== undefined) gcnUpdateData.ngayGhiNhanTuyenThe = ngayGhiNhan || null;
         if (ngayGhiNhan) {
             const newHanNopTuyenThe = dayjs(ngayGhiNhan)
                 .add(5, "year")
                 .format("YYYY-MM-DD");
-
-            await gcn.update({
-                hanNopTuyenThe: newHanNopTuyenThe,
-            });
+            gcnUpdateData.hanNopTuyenThe = newHanNopTuyenThe;
 
             console.log(
                 `🔁 Cập nhật hạn nộp tuyên thệ = ${newHanNopTuyenThe} cho GCN_NH id=${idGCN_NH}`
             );
         }
+        if (Object.keys(gcnUpdateData).length > 0) {
+            await gcn.update(gcnUpdateData, { transaction });
+        }
+
+        await transaction.commit();
 
         // ✅ 6. Trả kết quả
         return res.status(201).json({
@@ -102,6 +118,7 @@ export const addAffidavit = async (req, res) => {
             data: newAffidavit,
         });
     } catch (error) {
+        await transaction.rollback();
         console.error("❌ Lỗi khi thêm Affidavit:", error);
         return res.status(500).json({
             message: "Đã xảy ra lỗi khi thêm mới Affidavit!",
@@ -110,20 +127,53 @@ export const addAffidavit = async (req, res) => {
     }
 };
 
+const buildTokensSearchCondition = (value, fieldName) => {
+    if (!value) return undefined;
+    const tokens = String(value).trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return undefined;
+    if (tokens.length === 1) return { [fieldName]: { [Op.like]: `%${tokens[0]}%` } };
+    return {
+        [Op.and]: tokens.map((tok) => ({ [fieldName]: { [Op.like]: `%${tok}%` } })),
+    };
+};
+
 export const getAffidavitList = async (req, res) => {
     try {
-        const { soBang, pageIndex = 1, pageSize = 20 } = req.body;
-        const offset = (pageIndex - 1) * pageSize;
+        const {
+            soBang,
+            searchTerm,
+            customerName,
+            partnerName,
+            brandName,
+            loaiTuyenThe,
+            pageIndex = 1,
+            pageSize = 20,
+        } = req.body;
+        const limit = Number(pageSize) || 20;
+        const offset = ((Number(pageIndex) || 1) - 1) * limit;
 
         const whereCondition = {};
+        const searchKeyword = String(soBang || searchTerm || "").trim();
 
-        // ✅ Nếu người dùng nhập "soBang", sẽ tìm cả theo soAffidavit hoặc số bằng của GCN
-        if (soBang) {
+        // ✅ Tìm theo số Affidavit hoặc số bằng / số đơn / mã hồ sơ của GCN
+        if (searchKeyword) {
             whereCondition[Op.or] = [
-                { soAffidavit: { [Op.like]: `%${soBang}%` } },
-                { "$gcn.soBang$": { [Op.like]: `%${soBang}%` } },
+                { soAffidavit: { [Op.like]: `%${searchKeyword}%` } },
+                { "$gcn.soBang$": { [Op.like]: `%${searchKeyword}%` } },
+                { "$gcn.soDon$": { [Op.like]: `%${searchKeyword}%` } },
+                { "$gcn.maHoSo$": { [Op.like]: `%${searchKeyword}%` } },
             ];
         }
+
+        if (loaiTuyenThe) {
+            whereCondition.loaiTuyenThe = loaiTuyenThe;
+        }
+
+        const hasGcnNestedFilter = Boolean(
+            String(customerName || "").trim() ||
+            String(partnerName || "").trim() ||
+            String(brandName || "").trim()
+        );
 
         const { count, rows } = await Affidavit.findAndCountAll({
             where: whereCondition,
@@ -131,6 +181,7 @@ export const getAffidavitList = async (req, res) => {
                 {
                     model: GCN_NH_KH,
                     as: "gcn",
+                    required: hasGcnNestedFilter,
                     attributes: [
                         "id",
                         "soBang",
@@ -141,6 +192,10 @@ export const getAffidavitList = async (req, res) => {
                         "ngayHetHanBang",
                         "hanGiaHan",
                         "hanNopTuyenThe",
+                        "ngayNopYCTuyenThe",
+                        "loaiTuyenThe",
+                        "ngayGhiNhanTuyenThe",
+                        "trangThaiBang",
                         "dsNhomSPDV",
                         "ngayNopDon",
                     ],
@@ -149,23 +204,31 @@ export const getAffidavitList = async (req, res) => {
                             model: NhanHieu,
                             as: "NhanHieu",
                             attributes: ["tenNhanHieu"],
+                            required: Boolean(String(brandName || "").trim()),
+                            where: buildTokensSearchCondition(brandName, "tenNhanHieu"),
                         },
                         {
                             model: KhachHangCuoi,
                             as: "KhachHangCuoi",
                             attributes: ["tenKhachHang"],
+                            required: Boolean(String(customerName || "").trim()),
+                            where: buildTokensSearchCondition(customerName, "tenKhachHang"),
                         },
                         {
                             model: DoiTac,
                             as: "DoiTac",
                             attributes: ["tenDoiTac"],
+                            required: Boolean(String(partnerName || "").trim()),
+                            where: buildTokensSearchCondition(partnerName, "tenDoiTac"),
                         },
                     ],
                 },
             ],
             order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
-            limit: pageSize,
+            limit,
             offset,
+            subQuery: false,
+            distinct: true,
         });
 
         return res.status(200).json({
@@ -214,6 +277,10 @@ export const getAffidavitDetail = async (req, res) => {
                         "idKhachHang",
                         "idDoiTac",
                         "hanNopTuyenThe",
+                        "ngayNopYCTuyenThe",
+                        "loaiTuyenThe",
+                        "ngayGhiNhanTuyenThe",
+                        "trangThaiBang",
                         "ngayNopDon",
                         "ghiChu",
                         "dsNhomSPDV",
@@ -272,12 +339,14 @@ export const editAffidavit = async (req, res) => {
             lanNop,
             ngayNop,
             ngayGhiNhan,
+            loaiTuyenThe,
             ghiChu,
             isAutoImport,
             taiLieus
         } = req.body;
 
         if (!id) {
+            await transaction.rollback();
             return res.status(400).json({ message: "Thiếu ID Affidavit cần cập nhật!" });
         }
 
@@ -305,6 +374,7 @@ export const editAffidavit = async (req, res) => {
             lanNop: lanNop ?? affidavit.lanNop,
             ngayNop: ngayNop ?? affidavit.ngayNop,
             ngayGhiNhan: ngayGhiNhan ?? affidavit.ngayGhiNhan,
+            loaiTuyenThe: loaiTuyenThe ?? affidavit.loaiTuyenThe,
             ghiChu: ghiChu ?? affidavit.ghiChu,
             isAutoImport: isAutoImport ?? affidavit.isAutoImport,
         }, { transaction });
@@ -347,17 +417,20 @@ export const editAffidavit = async (req, res) => {
             }
         }
 
-        // ✅ 6. Cập nhật hạn nộp tuyên thệ
+        // ✅ 6. Cập nhật thông tin tuyên thệ & hạn nộp tuyên thệ trên văn bằng
+        const gcnUpdateData = {};
+        if (ngayNop !== undefined) gcnUpdateData.ngayNopYCTuyenThe = ngayNop || null;
+        if (loaiTuyenThe !== undefined) gcnUpdateData.loaiTuyenThe = loaiTuyenThe || null;
+        if (ngayGhiNhan !== undefined) gcnUpdateData.ngayGhiNhanTuyenThe = ngayGhiNhan || null;
         if (ngayGhiNhan) {
-            const newHanNopTuyenThe = dayjs(ngayGhiNhan)
+            gcnUpdateData.hanNopTuyenThe = dayjs(ngayGhiNhan)
                 .add(5, "year")
                 .format("YYYY-MM-DD");
-
+        }
+        if (Object.keys(gcnUpdateData).length > 0) {
             const gcnUpdateTarget = gcn || (await GCN_NH_KH.findByPk(affidavit.idGCN_NH, { transaction }));
             if (gcnUpdateTarget) {
-                await gcnUpdateTarget.update({
-                    hanNopTuyenThe: newHanNopTuyenThe,
-                }, { transaction });
+                await gcnUpdateTarget.update(gcnUpdateData, { transaction });
             }
         }
 

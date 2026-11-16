@@ -433,6 +433,51 @@ export const syncDatabase = async () => {
         } catch (gcnBackfillErr) {
             console.error("⚠️ GCN expiry backfill warning:", gcnBackfillErr?.message);
         }
+
+        // Cập nhật schema GCN_NH_KH & Affidavit (nullable idKhachHang/maNhanHieu + các trường tuyên thệ)
+        try {
+            const gcnKhTbl = await resolveTableName("GCN_NH_KH");
+            const affidavitTbl = await resolveTableName("Affidavit");
+
+            await sequelize.query(`ALTER TABLE \`${gcnKhTbl}\` MODIFY COLUMN \`idKhachHang\` INT NULL;`).catch(() => {});
+            await sequelize.query(`ALTER TABLE \`${gcnKhTbl}\` MODIFY COLUMN \`maNhanHieu\` INT NULL;`).catch(() => {});
+            await sequelize.query(`ALTER TABLE \`${gcnKhTbl}\` ADD COLUMN \`ngayNopYCTuyenThe\` DATE NULL;`).catch(() => {});
+            await sequelize.query(`ALTER TABLE \`${gcnKhTbl}\` ADD COLUMN \`loaiTuyenThe\` VARCHAR(255) NULL;`).catch(() => {});
+            await sequelize.query(`ALTER TABLE \`${gcnKhTbl}\` ADD COLUMN \`ngayGhiNhanTuyenThe\` DATE NULL;`).catch(() => {});
+            await sequelize.query(`ALTER TABLE \`${affidavitTbl}\` ADD COLUMN \`loaiTuyenThe\` VARCHAR(255) NULL;`).catch(() => {});
+        } catch (schemaErr) {
+            console.error("⚠️ GCN_NH_KH / Affidavit schema migration warning:", schemaErr?.message);
+        }
+
+        // Backfill loaiDon mặc định = 1 cho DonDangKyNhanHieu_KH nếu NULL hoặc 0 (trừ đơn sửa đổi / đơn tách)
+        try {
+            const donKhTbl = await resolveTableName("DonDangKyNhanHieu_KH");
+            const sdKhTbl = await resolveTableName("DonSuaDoi_NH_KH");
+            const tachKhTbl = await resolveTableName("DonTachNH_KH");
+            await sequelize.query(`
+                UPDATE \`${donKhTbl}\` d
+                INNER JOIN \`${sdKhTbl}\` sd ON d.\`maDonDangKy\` = sd.\`maDonDangKy\`
+                SET d.\`loaiDon\` = 2
+                WHERE d.\`loaiDon\` IS NULL OR d.\`loaiDon\` = 0;
+            `).catch(() => {});
+            await sequelize.query(`
+                UPDATE \`${donKhTbl}\` d
+                INNER JOIN \`${tachKhTbl}\` td ON d.\`maDonDangKy\` = td.\`maDonDangKy\`
+                SET d.\`loaiDon\` = 3
+                WHERE d.\`loaiDon\` IS NULL OR d.\`loaiDon\` = 0;
+            `).catch(() => {});
+            await sequelize.query(`
+                UPDATE \`${donKhTbl}\` d
+                LEFT JOIN \`${sdKhTbl}\` sd ON d.\`maDonDangKy\` = sd.\`maDonDangKy\`
+                LEFT JOIN \`${tachKhTbl}\` td ON d.\`maDonDangKy\` = td.\`maDonDangKy\`
+                SET d.\`loaiDon\` = 1
+                WHERE (d.\`loaiDon\` IS NULL OR d.\`loaiDon\` = 0)
+                  AND sd.\`maDonDangKy\` IS NULL
+                  AND td.\`maDonDangKy\` IS NULL;
+            `).catch(() => {});
+        } catch (khLoaiDonErr) {
+            console.error("⚠️ DonDangKyNhanHieu_KH loaiDon backfill warning:", khLoaiDonErr?.message);
+        }
     } catch (err) {
         console.error("Database sync error:", err);
     }
@@ -572,6 +617,8 @@ DonGiaHan_NH_KH.belongsTo(GCN_NH_KH, {
     as: 'gcn',
     onDelete: 'CASCADE'
 });
+DonGiaHan_NH_KH.hasMany(TaiLieuGH_NH_KH, { foreignKey: 'idDonGiaHan', as: 'TaiLieuGH_NH_KH' });
+TaiLieuGH_NH_KH.belongsTo(DonGiaHan_NH_KH, { foreignKey: 'idDonGiaHan' });
 
 TuVanChung_VN.belongsTo(KhachHangCuoi, {
     foreignKey: "idKhachHang",

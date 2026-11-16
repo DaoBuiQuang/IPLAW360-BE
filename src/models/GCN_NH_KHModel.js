@@ -27,7 +27,7 @@ export const GCN_NH_KH = sequelize.define("GCN_NH_KH", {
     },
     idKhachHang: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
         references: {
             model: KhachHangCuoi,
             key: "id",
@@ -68,7 +68,7 @@ export const GCN_NH_KH = sequelize.define("GCN_NH_KH", {
     },
     maNhanHieu: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
         references: {
             model: NhanHieu,
             key: "maNhanHieu",
@@ -139,6 +139,18 @@ export const GCN_NH_KH = sequelize.define("GCN_NH_KH", {
         defaultValue: 0
     },
     hanNopTuyenThe: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+    },
+    ngayNopYCTuyenThe: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+    },
+    loaiTuyenThe: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
+    ngayGhiNhanTuyenThe: {
         type: DataTypes.DATEONLY,
         allowNull: true,
     },

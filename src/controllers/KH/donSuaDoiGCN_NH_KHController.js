@@ -1,12 +1,8 @@
-// controllers/NH_VN_SD/donSuaDoi_NH_VNController.js
+// controllers/KH/donSuaDoiGCN_NH_KHController.js
+import { Op } from "sequelize";
 import { sequelize } from "../../config/db.js";
-import { DonDangKy } from "../../models/donDangKyModel.js";
 import { KhachHangCuoi } from "../../models/khanhHangCuoiModel.js";
-import { DonSuaDoi_NH_VN } from "../../models/VN_SuaDoi_NH/donSuaDoiNH_VNModel.js";
-import { DonDK_SPDV } from "../../models/donDK_SPDVMolel.js"
 import crypto from "crypto";
-import { GCN_NH } from "../../models/GCN_NHModel.js";
-import { DonSuaDoiGCN_NH_VN } from "../../models/VN_SuaDoi_NH/donSuaDoiGCN_NH_VNModel.js";
 import { GCN_NH_KH } from "../../models/GCN_NH_KHModel.js";
 import { DonSuaDoiGCN_NH_KH } from "../../models/KH_SuaDoi_NH/donSuaDoiGCN_NH_KHModel.js";
 import { DoiTac } from "../../models/doiTacModel.js";
@@ -62,14 +58,16 @@ export const addApplicationSD_GCN_NHKH = async (req, res) => {
 
         // ====== VALIDATE INPUT ======
         if (!maHoSo || !idGCN_NH_Cu) {
+            await transaction.rollback();
             return res
                 .status(400)
                 .json({ message: "Thiếu thông tin bắt buộc (mã hồ sơ, mã đơn, số đơn)." });
         }
 
         // ====== TÌM ĐƠN ĐĂNG KÝ CŨ ======
-        const gcnCu = await GCN_NH_KH.findOne({ where: { id: idGCN_NH_Cu } });
+        const gcnCu = await GCN_NH_KH.findOne({ where: { id: idGCN_NH_Cu }, transaction });
         if (!gcnCu) {
+            await transaction.rollback();
             return res.status(404).json({ message: "Không tìm thấy giấy chứng nhận gốc." });
         }
 
@@ -77,9 +75,10 @@ export const addApplicationSD_GCN_NHKH = async (req, res) => {
 
         // ====== XỬ LÝ SỬA ĐỔI KHÁCH HÀNG ======
         if (suaDoiTenChuBang || suaDoiDiaChi) {
-            const khachCu = await KhachHangCuoi.findByPk(gcnCu.idKhachHang);
+            const khachCu = await KhachHangCuoi.findByPk(gcnCu.idKhachHang, { transaction });
 
             if (!khachCu) {
+                await transaction.rollback();
                 return res.status(404).json({ message: "Không tìm thấy khách hàng của đơn gốc." });
             }
             const maKhachHangMoi = generateNewMaKhachHang(khachCu.maKhachHang);
@@ -166,20 +165,48 @@ export const addApplicationSD_GCN_NHKH = async (req, res) => {
     }
 };
 
+const buildTokensSearchCondition = (value, fieldName) => {
+    if (!value) return undefined;
+    const tokens = String(value).trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return undefined;
+    if (tokens.length === 1) return { [fieldName]: { [Op.like]: `%${tokens[0]}%` } };
+    return {
+        [Op.and]: tokens.map((tok) => ({ [fieldName]: { [Op.like]: `%${tok}%` } })),
+    };
+};
+
 export const getAllApplication_SD_KH = async (req, res) => {
     try {
-        const { soBang, pageIndex = 1, pageSize = 20 } = req.body;
-        const offset = (pageIndex - 1) * pageSize;
+        const {
+            soBang,
+            searchTerm,
+            customerName,
+            partnerName,
+            brandName,
+            pageIndex = 1,
+            pageSize = 20,
+        } = req.body;
+        const limit = Number(pageSize) || 20;
+        const offset = ((Number(pageIndex) || 1) - 1) * limit;
 
         const whereCondition = {};
+        const searchKeyword = String(soBang || searchTerm || "").trim();
 
-        // ✅ Nếu người dùng nhập "soBang", sẽ tìm cả theo soAffidavit hoặc số bằng của GCN
-        if (soBang) {
+        // ✅ Tìm theo số đơn sửa đổi hoặc số bằng / số đơn / mã hồ sơ của GCN
+        if (searchKeyword) {
             whereCondition[Op.or] = [
-                { soDon: { [Op.like]: `%${soBang}%` } },
-                { "$gcn.soBang$": { [Op.like]: `%${soBang}%` } },
+                { soDon: { [Op.like]: `%${searchKeyword}%` } },
+                { "$gcn.soBang$": { [Op.like]: `%${searchKeyword}%` } },
+                { "$gcn.soDon$": { [Op.like]: `%${searchKeyword}%` } },
+                { "$gcn.maHoSo$": { [Op.like]: `%${searchKeyword}%` } },
             ];
         }
+
+        const hasGcnNestedFilter = Boolean(
+            String(customerName || "").trim() ||
+            String(partnerName || "").trim() ||
+            String(brandName || "").trim()
+        );
 
         const { count: totalItems, rows } = await DonSuaDoiGCN_NH_KH.findAndCountAll({
             where: whereCondition,
@@ -187,6 +214,7 @@ export const getAllApplication_SD_KH = async (req, res) => {
                 {
                     model: GCN_NH_KH,
                     as: "gcn",
+                    required: hasGcnNestedFilter,
                     attributes: [
                         "id",
                         "soBang",
@@ -204,23 +232,31 @@ export const getAllApplication_SD_KH = async (req, res) => {
                             model: NhanHieu,
                             as: "NhanHieu",
                             attributes: ["tenNhanHieu"],
+                            required: Boolean(String(brandName || "").trim()),
+                            where: buildTokensSearchCondition(brandName, "tenNhanHieu"),
                         },
                         {
                             model: KhachHangCuoi,
                             as: "KhachHangCuoi",
                             attributes: ["tenKhachHang"],
+                            required: Boolean(String(customerName || "").trim()),
+                            where: buildTokensSearchCondition(customerName, "tenKhachHang"),
                         },
                         {
                             model: DoiTac,
                             as: "DoiTac",
                             attributes: ["tenDoiTac"],
+                            required: Boolean(String(partnerName || "").trim()),
+                            where: buildTokensSearchCondition(partnerName, "tenDoiTac"),
                         },
                     ],
                 },
             ],
             order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
-            limit: pageSize,
+            limit,
             offset,
+            subQuery: false,
+            distinct: true,
         });
 
         return res.status(200).json({

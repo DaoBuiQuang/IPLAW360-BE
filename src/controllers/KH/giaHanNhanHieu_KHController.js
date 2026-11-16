@@ -7,27 +7,55 @@ import { SanPham_DichVu } from "../../models/sanPham_DichVuModel.js";
 import cron from 'node-cron';
 import { Sequelize } from "sequelize";
 import { KhachHangCuoi } from "../../models/khanhHangCuoiModel.js";
-import { TaiLieuGH_NH_VN } from "../../models/VN_GiaHan_NH/taiLieuGH_NH_VN_Model.js";
+import { TaiLieuGH_NH_KH } from "../../models/KH_GiaHan/taiLieuGH_NH_KHModel.js";
 import { VuViec } from "../../models/vuViecModel.js";
 import crypto from "crypto";
 import { DoiTac } from "../../models/doiTacModel.js";
 import { DonGiaHan_NH_KH } from "../../models/KH_GiaHan/DonGiaHan_NH_KHModel.js";
 import { GCN_NH_KH } from "../../models/GCN_NH_KHModel.js";
 
+const buildTokensSearchCondition = (value, fieldName) => {
+    if (!value) return undefined;
+    const tokens = String(value).trim().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return undefined;
+    if (tokens.length === 1) return { [fieldName]: { [Op.like]: `%${tokens[0]}%` } };
+    return {
+        [Op.and]: tokens.map((tok) => ({ [fieldName]: { [Op.like]: `%${tok}%` } })),
+    };
+};
+
 export const getAllApplication_GH_KH = async (req, res) => {
     try {
-        const { soBang, pageIndex = 1, pageSize = 20 } = req.body;
-        const offset = (pageIndex - 1) * pageSize;
+        const {
+            soBang,
+            searchTerm,
+            customerName,
+            partnerName,
+            brandName,
+            pageIndex = 1,
+            pageSize = 20,
+        } = req.body;
+        const limit = Number(pageSize) || 20;
+        const offset = ((Number(pageIndex) || 1) - 1) * limit;
 
         const whereCondition = {};
+        const searchKeyword = String(soBang || searchTerm || "").trim();
 
-        // ✅ Nếu người dùng nhập "soBang", sẽ tìm cả theo soAffidavit hoặc số bằng của GCN
-        if (soBang) {
+        // ✅ Tìm theo số đơn gia hạn hoặc số bằng / số đơn / mã hồ sơ của GCN
+        if (searchKeyword) {
             whereCondition[Op.or] = [
-                { soDon: { [Op.like]: `%${soBang}%` } },
-                { "$gcn.soBang$": { [Op.like]: `%${soBang}%` } },
+                { soDon: { [Op.like]: `%${searchKeyword}%` } },
+                { "$gcn.soBang$": { [Op.like]: `%${searchKeyword}%` } },
+                { "$gcn.soDon$": { [Op.like]: `%${searchKeyword}%` } },
+                { "$gcn.maHoSo$": { [Op.like]: `%${searchKeyword}%` } },
             ];
         }
+
+        const hasGcnNestedFilter = Boolean(
+            String(customerName || "").trim() ||
+            String(partnerName || "").trim() ||
+            String(brandName || "").trim()
+        );
 
         const { count: totalItems, rows } = await DonGiaHan_NH_KH.findAndCountAll({
             where: whereCondition,
@@ -35,6 +63,7 @@ export const getAllApplication_GH_KH = async (req, res) => {
                 {
                     model: GCN_NH_KH,
                     as: "gcn",
+                    required: hasGcnNestedFilter,
                     attributes: [
                         "id",
                         "soBang",
@@ -52,23 +81,31 @@ export const getAllApplication_GH_KH = async (req, res) => {
                             model: NhanHieu,
                             as: "NhanHieu",
                             attributes: ["tenNhanHieu"],
+                            required: Boolean(String(brandName || "").trim()),
+                            where: buildTokensSearchCondition(brandName, "tenNhanHieu"),
                         },
                         {
                             model: KhachHangCuoi,
                             as: "KhachHangCuoi",
                             attributes: ["tenKhachHang"],
+                            required: Boolean(String(customerName || "").trim()),
+                            where: buildTokensSearchCondition(customerName, "tenKhachHang"),
                         },
                         {
                             model: DoiTac,
                             as: "DoiTac",
                             attributes: ["tenDoiTac"],
+                            required: Boolean(String(partnerName || "").trim()),
+                            where: buildTokensSearchCondition(partnerName, "tenDoiTac"),
                         },
                     ],
                 },
             ],
             order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
-            limit: pageSize,
+            limit,
             offset,
+            subQuery: false,
+            distinct: true,
         });
 
         return res.status(200).json({
@@ -99,15 +136,15 @@ export const getApplicationById_GH_KH = async (req, res) => {
             });
         }
 
-        const donGiaHan_NH_VN = await DonGiaHan_NH_KH.findByPk(id, {
+        const donGiaHan_NH_KH = await DonGiaHan_NH_KH.findByPk(id, {
             include: [
                 {
-                    model: TaiLieuGH_NH_VN,
-                    as: "TaiLieuGH_NH_VN",
+                    model: TaiLieuGH_NH_KH,
+                    as: "TaiLieuGH_NH_KH",
                     attributes: ["maTaiLieu", "tenTaiLieu", "linkTaiLieu", "trangThai"],
                 },
                 {
-                    model: GCN_NH,
+                    model: GCN_NH_KH,
                     as: "gcn",
                     attributes: [
                         "id",
@@ -133,14 +170,14 @@ export const getApplicationById_GH_KH = async (req, res) => {
             ],
         });
 
-        if (!donGiaHan_NH_VN) {
+        if (!donGiaHan_NH_KH) {
             return res.status(404).json({
                 message: "Không tìm thấy đơn gia hạn!",
             });
         }
 
         // 👉 Chuyển sang object thường để dễ xử lý
-        const data = donGiaHan_NH_VN.toJSON();
+        const data = donGiaHan_NH_KH.toJSON();
 
         if (data.gcn) {
             data.gcn.tenNhanHieu = data.gcn.NhanHieu?.tenNhanHieu || null;
@@ -222,6 +259,7 @@ export const updateApplication_GH_KH = async (req, res) => {
         } = req.body;
 
         if (!id) {
+            await transaction.rollback();
             return res.status(400).json({ message: "Thiếu ID đơn gia hạn cần cập nhật!" });
         }
 
@@ -375,53 +413,64 @@ export const updateApplication_GH_KH = async (req, res) => {
 
 export const getFullApplicationDetail_GH_KH = async (req, res) => {
     try {
-        const { maDonGiaHan } = req.body;
-        if (!maDonGiaHan) return res.status(400).json({ message: "Thiếu mã đơn gia hạn" });
+        const targetId = req.body.id || req.body.maDonGiaHan;
+        if (!targetId) return res.status(400).json({ message: "Thiếu mã đơn gia hạn" });
 
-        const don = await DonGiaHan_NH_KH.findOne({
-            where: { maDonGiaHan },
+        const don = await DonGiaHan_NH_KH.findByPk(targetId, {
             include: [
                 {
                     model: TaiLieuGH_NH_KH,
-                    as: "TaiLieuGH_NH_VN",
+                    as: "TaiLieuGH_NH_KH",
                     attributes: ["maTaiLieu", "tenTaiLieu", "linkTaiLieu", "trangThai"]
                 },
                 {
-                    model: NhanHieu,
-                    as: "NhanHieu",
-                    attributes: ["maNhanHieu", "tenNhanHieu", "linkAnh"]
-                },
-                {
-                    model: KhachHangCuoi,
-                    as: "khachHang",
-                    attributes: ["id", "maKhachHang", "tenKhachHang", "diaChi", "sdt"]
+                    model: GCN_NH_KH,
+                    as: "gcn",
+                    attributes: [
+                        "id",
+                        "soBang",
+                        "soDon",
+                        "maHoSo",
+                        "maNhanHieu",
+                        "ngayCapBang",
+                        "ngayHetHanBang",
+                        "hanGiaHan",
+                        "idKhachHang",
+                        "idDoiTac",
+                        "ngayNopDon",
+                        "ghiChu",
+                        "dsNhomSPDV",
+                    ],
+                    include: [
+                        {
+                            model: NhanHieu,
+                            as: "NhanHieu",
+                            attributes: ["maNhanHieu", "tenNhanHieu", "linkAnh"]
+                        },
+                        {
+                            model: KhachHangCuoi,
+                            as: "KhachHangCuoi",
+                            attributes: ["id", "maKhachHang", "tenKhachHang", "diaChi", "sdt"]
+                        },
+                        {
+                            model: DoiTac,
+                            as: "DoiTac",
+                            attributes: ["tenDoiTac"]
+                        }
+                    ]
                 }
             ]
         });
 
-        if (!don) return res.status(404).json({ message: "Không tìm thấy đơn đăng ký" });
+        if (!don) return res.status(404).json({ message: "Không tìm thấy đơn gia hạn" });
 
         const plainDon = don.toJSON();
-        // plainDon.lichSuThamDinhHT = [];
-        // plainDon.lichSuThamDinhND = [];
 
-        // if (Array.isArray(plainDon.lichSuThamDinh)) {
-        //     for (const item of plainDon.lichSuThamDinh) {
-        //         if (item.loaiThamDinh === "HinhThuc") {
-        //             plainDon.lichSuThamDinhHT.push(item);
-        //         } else if (item.loaiThamDinh === "NoiDung") {
-        //             plainDon.lichSuThamDinhND.push(item);
-        //         }
-        //     }
-        // }
-
-        // delete plainDon.lichSuThamDinh;
-
-        if (plainDon.khachHang) {
-            plainDon.maKhachHang = plainDon.khachHang.maKhachHang;
-            plainDon.tenKhachHang = plainDon.khachHang.tenKhachHang;
-            plainDon.diaChi = plainDon.khachHang.diaChi;
-            plainDon.sdt = plainDon.khachHang.sdt;
+        if (plainDon.gcn?.KhachHangCuoi) {
+            plainDon.maKhachHang = plainDon.gcn.KhachHangCuoi.maKhachHang;
+            plainDon.tenKhachHang = plainDon.gcn.KhachHangCuoi.tenKhachHang;
+            plainDon.diaChi = plainDon.gcn.KhachHangCuoi.diaChi;
+            plainDon.sdt = plainDon.gcn.KhachHangCuoi.sdt;
         }
 
         res.json(plainDon);

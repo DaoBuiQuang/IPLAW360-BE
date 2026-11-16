@@ -1,11 +1,7 @@
-// controllers/NH_VN_SD/donSuaDoi_NH_VNController.js
+// controllers/KH/donSuaDoi_NH_KHController.js
 import { sequelize } from "../../config/db.js";
-import { DonDangKy } from "../../models/donDangKyModel.js";
 import { KhachHangCuoi } from "../../models/khanhHangCuoiModel.js";
-import { DonSuaDoi_NH_VN } from "../../models/VN_SuaDoi_NH/donSuaDoiNH_VNModel.js";
-import { DonDK_SPDV } from "../../models/donDK_SPDVMolel.js"
-import { Op, literal } from "sequelize";
-import { Sequelize } from "sequelize";
+import { Op, literal, Sequelize } from "sequelize";
 import crypto from "crypto";
 import { DonDangKyNhanHieu_KH } from "../../models/KH/donDangKyNhanHieu_KHModel.js";
 import { DonSuaDoi_NH_KH } from "../../models/KH_SuaDoi_NH/donSuaDoiNH_KHModel.js";
@@ -64,17 +60,20 @@ export const addApplicationSDNHKH = async (req, res) => {
 
         // ====== VALIDATE INPUT ======
         if (!maHoSo || !maDonDangKyCu || !soDonSD) {
+            await transaction.rollback();
             return res
                 .status(400)
                 .json({ message: "Thiếu thông tin bắt buộc (mã hồ sơ, mã đơn, số đơn)." });
         }
 
         // ====== TÌM ĐƠN ĐĂNG KÝ CŨ ======
-        const donCu = await DonDangKyNhanHieu_KH.findOne({ where: { maDonDangKy: maDonDangKyCu } });
+        const donCu = await DonDangKyNhanHieu_KH.findOne({ where: { maDonDangKy: maDonDangKyCu }, transaction });
         if (!donCu) {
+            await transaction.rollback();
             return res.status(404).json({ message: "Không tìm thấy đơn đăng ký gốc." });
         }
         if (donCu.trangThaiVuViec !== "1") {
+            await transaction.rollback();
             return res.status(400).json({
                 message: "Trạng thái đơn phải là đang giải quyết mới được lập đơn sửa đổi."
             });
@@ -83,9 +82,10 @@ export const addApplicationSDNHKH = async (req, res) => {
 
         // ====== XỬ LÝ SỬA ĐỔI KHÁCH HÀNG ======
         if (suaDoiTenChuDon || suaDoiDiaChi) {
-            const khachCu = await KhachHangCuoi.findByPk(donCu.idKhachHang);
+            const khachCu = await KhachHangCuoi.findByPk(donCu.idKhachHang, { transaction });
 
             if (!khachCu) {
+                await transaction.rollback();
                 return res.status(404).json({ message: "Không tìm thấy khách hàng của đơn gốc." });
             }
             const maKhachHangMoi = generateNewMaKhachHang(khachCu.maKhachHang);
@@ -293,17 +293,17 @@ export const getAllApplicationSD_KH = async (req, res) => {
     const order = [];
     if (sortByHanTraLoi) {
       order.push([
-        Sequelize.literal(`CASE WHEN trangThaiVuViec = '5' THEN 1 ELSE 0 END`),
+        Sequelize.literal("CASE WHEN `DonDangKyNhanHieu_KH`.`trangThaiVuViec` = '5' THEN 1 ELSE 0 END"),
         "ASC"
       ]);
-      order.push(["hanTraLoi", "ASC"]);
+      order.push([Sequelize.col("DonDangKyNhanHieu_KH.hanTraLoi"), "ASC"]);
     }
     if (sortByHanXuLy) {
       order.push([
-        Sequelize.literal(`CASE WHEN trangThaiVuViec = '5' THEN 1 ELSE 0 END`),
+        Sequelize.literal("CASE WHEN `DonDangKyNhanHieu_KH`.`trangThaiVuViec` = '5' THEN 1 ELSE 0 END"),
         "ASC"
       ]);
-      order.push(["hanXuLy", "ASC"]);
+      order.push([Sequelize.col("DonDangKyNhanHieu_KH.hanXuLy"), "ASC"]);
     }
 
     // Bổ sung field cần thiết

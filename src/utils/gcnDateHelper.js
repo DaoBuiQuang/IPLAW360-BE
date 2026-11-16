@@ -27,6 +27,16 @@ export const computeHanGiaHan = (ngayNopDon) => {
 };
 
 /**
+ * Tính hạn nộp tuyên thệ = (ngayGhiNhanTuyenThe || ngayCapBang) + 5 năm (YYYY-MM-DD)
+ */
+export const computeHanNopTuyenThe = (baseDate) => {
+    if (isEmptyDate(baseDate)) return null;
+    const parsed = dayjs(baseDate);
+    if (!parsed.isValid()) return null;
+    return parsed.add(5, "year").format("YYYY-MM-DD");
+};
+
+/**
  * Chuẩn hóa ngayHetHanBang và hanGiaHan trước khi lưu vào DB:
  * - Nếu ngayHetHanBang trống mà có ngayNopDon -> tự động tính ngayNopDon + 10 năm
  * - Nếu hanGiaHan trống mà có ngayNopDon -> tự động tính ngayNopDon + 9.5 năm
