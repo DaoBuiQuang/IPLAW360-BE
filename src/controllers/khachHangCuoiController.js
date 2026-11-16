@@ -84,7 +84,7 @@ export const getCustomerNamesAndCodes = async (req, res) => {
           required: false, // LEFT JOIN — giữ KH không có đối tác
         }
       ],
-      order: [["tenKhachHang", "ASC"]],
+      order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
     };
 
     if (req.body?.limit) {
@@ -148,7 +148,8 @@ export const getCustomers = async (req, res) => {
         { model: NhanSu, as: "nhanSu", attributes: ["hoTen"] }
       ],
       limit: pageSize,
-      offset: offset
+      offset: offset,
+      order: [["updatedAt", "DESC"], ["createdAt", "DESC"]]
     });
 
     if (!customers.length) {

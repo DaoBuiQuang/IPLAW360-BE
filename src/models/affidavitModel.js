@@ -37,6 +37,10 @@ export const Affidavit = sequelize.define("Affidavit", {
         type: DataTypes.DATEONLY,
         allowNull: true,
     },
+    loaiTuyenThe: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
     ghiChu:{
         type: DataTypes.TEXT,
         allowNull: true

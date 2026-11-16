@@ -31,7 +31,7 @@ export const getContacts = async (req, res) => {
             where,
             limit: safeLimit,
             offset,
-            order: [["createdAt", "DESC"]],
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
         });
 
         if (!rows.length) {

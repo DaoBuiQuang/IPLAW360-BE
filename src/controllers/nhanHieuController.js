@@ -38,8 +38,8 @@ export const getAllNhanHieu = async (req, res) => {
             where[Op.or] = orConditions;
         }
 
-        // Tùy biến sắp xếp nếu có sortBy, mặc định sắp xếp theo maNhanHieu DESC (nhãn hiệu mới nhất lên đầu)
-        let order = [["maNhanHieu", "DESC"]];
+        // Tùy biến sắp xếp nếu có sortBy, mặc định sắp xếp theo updatedAt DESC, createdAt DESC
+        let order = [["updatedAt", "DESC"], ["createdAt", "DESC"]];
         if (sortBy) {
             const allowedSortFields = ["maNhanHieu", "tenNhanHieu", "createdAt", "updatedAt"];
             if (allowedSortFields.includes(sortBy)) {
@@ -94,7 +94,7 @@ export const getShortListNhanHieu = async (req, res) => {
         const queryOptions = {
             where,
             attributes: ["maNhanHieu", "tenNhanHieu"],
-            order: [["tenNhanHieu", "ASC"]],
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
         };
         if (limit) {
             queryOptions.limit = Math.min(Math.max(Number(limit) || 20, 1), 200);

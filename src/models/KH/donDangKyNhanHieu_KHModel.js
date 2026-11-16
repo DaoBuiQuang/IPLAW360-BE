@@ -24,6 +24,7 @@ export const DonDangKyNhanHieu_KH = sequelize.define("DonDangKyNhanHieu_KH", {
     loaiDon: {
         type: DataTypes.INTEGER,
         allowNull: true,
+        defaultValue: 1,
         comment: '1: Đăng ký mới, 2: Đơn sửa đổi, 3: Đơn tách',
     },
     idKhachHang: {

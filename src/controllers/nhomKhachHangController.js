@@ -18,7 +18,7 @@ export const getGroups = async (req, res) => {
         const groups = await NhomKhachHang.findAll({
             where: whereCondition,
             attributes: ["id", "maNhom", "tenNhom", "moTa"],
-            order: [["tenNhom", "ASC"]],
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
             limit: pageSize,
             offset,
         });
@@ -46,7 +46,7 @@ export const getAllGroups = async (req, res) => {
     try {
         const groups = await NhomKhachHang.findAll({
             attributes: ["id", "maNhom", "tenNhom", "moTa", "ghiChu"],
-            order: [["tenNhom", "ASC"]],
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
         });
 
         if (!groups.length) {

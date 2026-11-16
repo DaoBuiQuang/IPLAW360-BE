@@ -18,7 +18,7 @@ export const getAllSanPhamDichVu = async (req, res) => {
 
         const items = await SanPham_DichVu.findAll({
             where: whereClause,
-            order: [[Sequelize.literal('CAST(maSPDV AS UNSIGNED)'), 'ASC']]
+            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]]
         });
 
         if (items.length === 0) {

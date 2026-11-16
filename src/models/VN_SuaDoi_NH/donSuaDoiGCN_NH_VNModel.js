@@ -13,7 +13,7 @@ export const DonSuaDoiGCN_NH_VN = sequelize.define("DonSuaDoiGCN_NH_VN", {
     },
     idGCN_NH: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
         references: {
             model: GCN_NH,
             key: "id",
@@ -109,6 +109,28 @@ export const DonSuaDoiGCN_NH_VN = sequelize.define("DonSuaDoiGCN_NH_VN", {
         allowNull: false,
         defaultValue: false, // false = nhập tay, true = nhập máy
         comment: 'Phân biệt dữ liệu nhập tay hoặc nhập tự động'
+    },
+    trangThaiDuyet: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        comment: '0: Chưa chấp thuận, 1: Được chấp thuận, 2: Từ chối'
+    },
+    ngayChapThuan: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+    },
+    ngayTuChoi: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+    },
+    lyDoTuChoi: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+    },
+    duLieuThayDoi: {
+        type: DataTypes.JSON,
+        allowNull: true,
     }
 }, {
     timestamps: true,
