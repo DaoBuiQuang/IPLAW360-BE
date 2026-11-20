@@ -28,15 +28,15 @@ export const DonDangKyNhanHieu_KH = sequelize.define("DonDangKyNhanHieu_KH", {
         comment: '1: Đăng ký mới, 2: Đơn sửa đổi, 3: Đơn tách',
     },
     idKhachHang: {
-        type: DataTypes.STRING,
-        allowNull: false,
+        type: DataTypes.INTEGER,
+        allowNull: true,
         references: {
             model: KhachHangCuoi,
             key: "id",
         },
     },
     idDoiTac: {
-        type: DataTypes.STRING,
+        type: DataTypes.INTEGER,
         allowNull: true,
         references: {
             model: DoiTac,
@@ -97,7 +97,7 @@ export const DonDangKyNhanHieu_KH = sequelize.define("DonDangKyNhanHieu_KH", {
     },
     maHoSoVuViec: {
         type: DataTypes.STRING,
-        allowNull: false,
+        allowNull: true,
         unique: true,
         references: {
             model: HoSo_VuViec,
@@ -221,6 +221,12 @@ export const DonDangKyNhanHieu_KH = sequelize.define("DonDangKyNhanHieu_KH", {
         allowNull: false,
         defaultValue: false, // false = nhập tay, true = nhập máy
         comment: 'Phân biệt dữ liệu nhập tay hoặc nhập tự động'
+    },
+    laDonTiepNhan: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        comment: '1: Đơn tiếp nhận từ đại diện khác'
     }
 }, {
     timestamps: true,

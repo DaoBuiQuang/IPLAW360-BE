@@ -63,6 +63,8 @@ import { DonSuaDoi_NH_KH } from "./KH_SuaDoi_NH/donSuaDoiNH_KHModel.js";
 import { DonSuaDoiGCN_NH_KH } from "./KH_SuaDoi_NH/donSuaDoiGCN_NH_KHModel.js";
 import { NguoiLienHe } from "./nguoiLienHeModal.js";
 import { GiayUyQuyen } from "./GiayUyQuyenModel.js";
+import { LichSuPhanHoiSuaDoi_NH_VN } from "./VN_SuaDoi_NH/lichSuPhanHoiSuaDoiNH_VNModel.js";
+import { LichSuPhanHoiSuaDoi_NH_KH } from "./KH_SuaDoi_NH/lichSuPhanHoiSuaDoiNH_KHModel.js";
 import { DonTachNH_VN, DonTach_NH_VN } from "./VN_TachDon_NH/donTachNH_VNModel.js";
 import { DonTachNH_KH } from "./KH_TachDon_NH/donTachNH_KHModel.js";
 import { TimeSheet } from "./timeSheetModel.js";
@@ -70,6 +72,9 @@ import { DanhSachCongViec } from "./dsCongViecModel.js";
 import { NhomNhanSu } from "./nhomNhanSuModel.js";
 import { DonCQSH_VN, DonCQSH_NH_VN } from "./VN_ChuyenQuyenSH/donCQSH_VNModel.js";
 import { DonCQSH_GCN_VN } from "./VN_ChuyenQuyenSH/donCQSH_GCN_VNModel.js";
+import { LichSuPhanHoiCQSH_NH_VN } from "./VN_ChuyenQuyenSH/lichSuPhanHoiCQSH_NH_VNModel.js";
+import { DonCQSH_KH, DonCQSH_NH_KH } from "./KH_ChuyenQuyenSH/donCQSH_KHModel.js";
+import { LichSuPhanHoiCQSH_NH_KH } from "./KH_ChuyenQuyenSH/lichSuPhanHoiCQSH_NH_KHModel.js";
 
 Auth.belongsTo(NhanSu, {
     foreignKey: 'maNhanSu',
@@ -206,278 +211,18 @@ DonDK_SPDV_KH.belongsTo(DonDangKyNhanHieu_KH, {
     foreignKey: 'maDonDangKy',
     as: 'DonDangKyNhanHieu_KH'
 });
+DonDK_SPDV_KH.belongsTo(SanPham_DichVu, {
+    foreignKey: 'maSPDV',
+    as: 'SanPham_DichVu'
+});
 DonDangKyNhanHieu_KH.hasMany(TaiLieu_KH, { foreignKey: 'maDonDangKy', as: 'taiLieuChuaNop_KH' });
 TaiLieu_KH.belongsTo(DonDangKyNhanHieu_KH, { foreignKey: 'maDonDangKy' });
 export const syncDatabase = async () => {
-    const resolveTableName = async (defaultName) => {
-        try {
-            const [rows] = await sequelize.query(
-                `SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = LOWER(:tName) LIMIT 1`,
-                { replacements: { tName: defaultName } }
-            );
-            if (rows && rows.length > 0 && rows[0].TABLE_NAME) {
-                return rows[0].TABLE_NAME;
-            }
-        } catch (e) {}
-        return defaultName;
-    };
-
-    const ensureColumnNullable = async (defaultTableName, columnName, fallbackType) => {
-        try {
-            const tbl = await resolveTableName(defaultTableName);
-            const [cols] = await sequelize.query(
-                `SELECT COLUMN_TYPE, IS_NULLABLE, CHARACTER_SET_NAME, COLLATION_NAME
-                 FROM INFORMATION_SCHEMA.COLUMNS
-                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tbl AND LOWER(COLUMN_NAME) = LOWER(:col) LIMIT 1`,
-                { replacements: { tbl, col: columnName } }
-            );
-            if (cols && cols.length > 0) {
-                const colInfo = cols[0];
-                if (colInfo.IS_NULLABLE === "NO") {
-                    const colType = colInfo.COLUMN_TYPE || fallbackType;
-                    const charsetClause = colInfo.CHARACTER_SET_NAME
-                        ? ` CHARACTER SET ${colInfo.CHARACTER_SET_NAME}${colInfo.COLLATION_NAME ? ` COLLATE ${colInfo.COLLATION_NAME}` : ""}`
-                        : "";
-                    await sequelize.query(`ALTER TABLE \`${tbl}\` MODIFY COLUMN \`${columnName}\` ${colType}${charsetClause} NULL;`);
-                }
-            }
-        } catch (e) {}
-    };
-
-    const ensureDeclarationColumns = async (defaultTableName) => {
-        const tbl = await resolveTableName(defaultTableName);
-        const addColSafe = async (sqlSuffix) => {
-            try {
-                await sequelize.query(`ALTER TABLE \`${tbl}\` ADD COLUMN ${sqlSuffix};`);
-            } catch (e) {}
-        };
-        await addColSafe(`\`trangThaiDuyet\` INT NOT NULL DEFAULT 0`);
-        await addColSafe(`\`ngayChapThuan\` DATE NULL DEFAULT NULL`);
-        await addColSafe(`\`ngayTuChoi\` DATE NULL DEFAULT NULL`);
-        await addColSafe(`\`lyDoTuChoi\` TEXT NULL`);
-        await addColSafe(`\`duLieuThayDoi\` JSON NULL`);
-    };
-
     try {
-        // Safe check and add isSystem column to DanhSachCongViec BEFORE sync to avoid any sync errors
-        try {
-            const dsTbl = await resolveTableName("DanhSachCongViec");
-            await sequelize.query(`
-                ALTER TABLE \`${dsTbl}\` ADD COLUMN isSystem TINYINT(1) NOT NULL DEFAULT 0;
-            `);
-        } catch (colErr) {
-            // Error code 1060 (ER_DUP_FIELDNAME) means column already exists; 1146 means table not created yet
-        }
-
-        // Safe check and add contributionPercentage column to TimeSheets before sync if not exists
-        try {
-            const tsTbl = await resolveTableName("TimeSheets");
-            await sequelize.query(`
-                ALTER TABLE \`${tsTbl}\` ADD COLUMN contributionPercentage DECIMAL(5, 2) NOT NULL DEFAULT 0.00;
-            `);
-        } catch (colErr) {
-            // Error code 1060 means column already exists; 1146 means table not created yet
-        }
-
-        // Safe check and add idGCN_NH_Goc, loaiBang, bangGoc to gcn_nh if not exists
-        const gcnTbl = await resolveTableName("gcn_nh");
-        try {
-            await sequelize.query(`ALTER TABLE \`${gcnTbl}\` ADD COLUMN loaiBang INT NULL DEFAULT 1;`);
-        } catch (e) {}
-        try {
-            await sequelize.query(`ALTER TABLE \`${gcnTbl}\` ADD COLUMN bangGoc TINYINT(1) NULL DEFAULT 0;`);
-        } catch (e) {}
-        try {
-            await sequelize.query(`ALTER TABLE \`${gcnTbl}\` ADD COLUMN idGCN_NH_Goc INT NULL DEFAULT NULL;`);
-        } catch (e) {}
-
-        // 1. Migration trên 4 Bảng Tờ khai Sửa đổi & Chuyển nhượng (trước sync)
-        await ensureColumnNullable("DonSuaDoi_NH_VN", "maDonDangKy", "VARCHAR(255)");
-        await ensureColumnNullable("DonCQSH_VN", "maDonDangKy", "VARCHAR(255)");
-        await ensureColumnNullable("DonCQSH_VN", "idKhachHang", "INT");
-        await ensureColumnNullable("DonSuaDoiGCN_NH_VN", "idGCN_NH", "INT");
-        await ensureColumnNullable("DonCQSH_GCN_VN", "idGCN_NH", "INT");
-        await ensureColumnNullable("DonCQSH_GCN_VN", "idKhachHang", "INT");
-
-        await ensureDeclarationColumns("DonSuaDoi_NH_VN");
-        await ensureDeclarationColumns("DonCQSH_VN");
-        await ensureDeclarationColumns("DonSuaDoiGCN_NH_VN");
-        await ensureDeclarationColumns("DonCQSH_GCN_VN");
-
+        // Toàn bộ DDL nâng cấp schema, index và backfill dữ liệu được quản lý tập trung
+        // tại thư mục /migrations (chạy bằng `npm run migrate`), không chạy ALTER/UPDATE lúc runtime.
         await sequelize.sync();
         console.log("✅ Database synchronized with all models");
-
-        // Đảm bảo lại các cột trên 4 bảng tờ khai (trong trường hợp bảng vừa được tạo mới bởi sync)
-        await ensureColumnNullable("DonSuaDoi_NH_VN", "maDonDangKy", "VARCHAR(255)");
-        await ensureColumnNullable("DonCQSH_VN", "maDonDangKy", "VARCHAR(255)");
-        await ensureColumnNullable("DonCQSH_VN", "idKhachHang", "INT");
-        await ensureColumnNullable("DonSuaDoiGCN_NH_VN", "idGCN_NH", "INT");
-        await ensureColumnNullable("DonCQSH_GCN_VN", "idGCN_NH", "INT");
-        await ensureColumnNullable("DonCQSH_GCN_VN", "idKhachHang", "INT");
-
-        await ensureDeclarationColumns("DonSuaDoi_NH_VN");
-        await ensureDeclarationColumns("DonCQSH_VN");
-        await ensureDeclarationColumns("DonSuaDoiGCN_NH_VN");
-        await ensureDeclarationColumns("DonCQSH_GCN_VN");
-
-        // Đồng bộ dữ liệu cũ an toàn cho 4 bảng tờ khai và bảng dondangkynhanhieu
-        try {
-            const tblSDDon = await resolveTableName("DonSuaDoi_NH_VN");
-            const tblCQDon = await resolveTableName("DonCQSH_VN");
-            const tblSDGCN = await resolveTableName("DonSuaDoiGCN_NH_VN");
-            const tblCQGCN = await resolveTableName("DonCQSH_GCN_VN");
-            const tblDonDK = await resolveTableName("DonDangKyNhanHieu");
-
-            // Các bản ghi tờ khai cũ đã có sẵn maDonDangKy / idGCN_NH khác NULL thì cập nhật trangThaiDuyet = 1
-            await sequelize.query(`
-                UPDATE \`${tblSDDon}\`
-                SET \`trangThaiDuyet\` = 1
-                WHERE \`maDonDangKy\` IS NOT NULL AND TRIM(\`maDonDangKy\`) <> '' AND (\`trangThaiDuyet\` IS NULL OR \`trangThaiDuyet\` = 0);
-            `);
-            await sequelize.query(`
-                UPDATE \`${tblCQDon}\`
-                SET \`trangThaiDuyet\` = 1
-                WHERE \`maDonDangKy\` IS NOT NULL AND TRIM(\`maDonDangKy\`) <> '' AND (\`trangThaiDuyet\` IS NULL OR \`trangThaiDuyet\` = 0);
-            `);
-            await sequelize.query(`
-                UPDATE \`${tblSDGCN}\`
-                SET \`trangThaiDuyet\` = 1
-                WHERE \`idGCN_NH\` IS NOT NULL AND (\`trangThaiDuyet\` IS NULL OR \`trangThaiDuyet\` = 0);
-            `);
-            await sequelize.query(`
-                UPDATE \`${tblCQGCN}\`
-                SET \`trangThaiDuyet\` = 1
-                WHERE \`idGCN_NH\` IS NOT NULL AND (\`trangThaiDuyet\` IS NULL OR \`trangThaiDuyet\` = 0);
-            `);
-
-            // Bản ghi trong dondangkynhanhieu có maDonDangKy nằm trong doncqsh_vn đang bị gán loaiDon = 3 thì cập nhật thành loaiDon = 4
-            await sequelize.query(`
-                UPDATE \`${tblDonDK}\` d
-                INNER JOIN \`${tblCQDon}\` cq ON d.\`maDonDangKy\` = cq.\`maDonDangKy\`
-                SET d.\`loaiDon\` = 4
-                WHERE d.\`loaiDon\` = 3;
-            `);
-
-            // Đảm bảo Index hiệu năng cho truy vấn phả hệ trên máy chủ lớn
-            const ensureIndexSafe = async (tbl, idxName, colName) => {
-                try {
-                    await sequelize.query(`CREATE INDEX \`${idxName}\` ON \`${tbl}\` (\`${colName}\`);`);
-                } catch (e) {}
-            };
-            await ensureIndexSafe(tblSDDon, "idx_sd_don_madongoc", "maDonDangKyGoc");
-            await ensureIndexSafe(tblSDDon, "idx_sd_don_trangthaiduyet", "trangThaiDuyet");
-            await ensureIndexSafe(tblCQDon, "idx_cq_don_trangthaiduyet", "trangThaiDuyet");
-            await ensureIndexSafe(tblSDGCN, "idx_sd_gcn_trangthaiduyet", "trangThaiDuyet");
-            await ensureIndexSafe(tblCQGCN, "idx_cq_gcn_trangthaiduyet", "trangThaiDuyet");
-            await ensureIndexSafe(gcnTbl, "idx_gcn_nh_idgcngoc", "idGCN_NH_Goc");
-        } catch (migrationErr) {
-            console.error("⚠️ Safe data migration warning:", migrationErr?.message);
-        }
-
-        // Update legacy records in DanhSachCongViec: tasks created by admin or with null maNhanSu become system tasks
-        try {
-            const dsTbl = await resolveTableName("DanhSachCongViec");
-            const authTbl = await resolveTableName("Auth");
-            await sequelize.query(`
-                UPDATE \`${dsTbl}\` SET isSystem = 1 WHERE maNhanSu IS NULL;
-            `);
-            await sequelize.query(`
-                UPDATE \`${dsTbl}\` d
-                LEFT JOIN \`${authTbl}\` a ON d.maNhanSu = a.maNhanSu
-                SET d.isSystem = 1
-                WHERE (LOWER(a.Role) IN ('admin', 'ceo') OR d.maNhanSu = 'admin');
-            `);
-            await sequelize.query(`
-                UPDATE \`${dsTbl}\` SET isSystem = 0 WHERE isSystem IS NULL;
-            `);
-        } catch (updateErr) {
-            // Ignore if already set
-        }
-
-        // Safe check and add index for isSystem on DanhSachCongViec
-        try {
-            const dsTbl = await resolveTableName("DanhSachCongViec");
-            await sequelize.query(`
-                ALTER TABLE \`${dsTbl}\` ADD INDEX idx_ds_cong_viec_is_system (isSystem);
-            `);
-        } catch (idxErr) {
-            // Ignore if index already exists (ER_DUP_KEYNAME)
-        }
-
-        // Update legacy records where contributionPercentage is NULL
-        try {
-            const tsTbl = await resolveTableName("TimeSheets");
-            await sequelize.query(`
-                UPDATE \`${tsTbl}\` SET contributionPercentage = 0.00 WHERE contributionPercentage IS NULL;
-            `);
-        } catch (updateErr) {
-            // Ignore if already set
-        }
-
-        // Tự động backfill ngayHetHanBang (+10 năm từ ngayNopDon) và hanGiaHan (+9.5 năm từ ngayNopDon) cho GCN còn trống
-        try {
-            const gcnVnTbl = await resolveTableName("gcn_nh");
-            const gcnKhTbl = await resolveTableName("GCN_NH_KH");
-            for (const tbl of [gcnVnTbl, gcnKhTbl]) {
-                await sequelize.query(`
-                    UPDATE \`${tbl}\`
-                    SET \`ngayHetHanBang\` = DATE_ADD(\`ngayNopDon\`, INTERVAL 10 YEAR)
-                    WHERE \`ngayHetHanBang\` IS NULL AND \`ngayNopDon\` IS NOT NULL;
-                `);
-                await sequelize.query(`
-                    UPDATE \`${tbl}\`
-                    SET \`hanGiaHan\` = DATE_ADD(DATE_ADD(\`ngayNopDon\`, INTERVAL 9 YEAR), INTERVAL 6 MONTH)
-                    WHERE \`hanGiaHan\` IS NULL AND \`ngayNopDon\` IS NOT NULL;
-                `);
-            }
-        } catch (gcnBackfillErr) {
-            console.error("⚠️ GCN expiry backfill warning:", gcnBackfillErr?.message);
-        }
-
-        // Cập nhật schema GCN_NH_KH & Affidavit (nullable idKhachHang/maNhanHieu + các trường tuyên thệ)
-        try {
-            const gcnKhTbl = await resolveTableName("GCN_NH_KH");
-            const affidavitTbl = await resolveTableName("Affidavit");
-
-            await sequelize.query(`ALTER TABLE \`${gcnKhTbl}\` MODIFY COLUMN \`idKhachHang\` INT NULL;`).catch(() => {});
-            await sequelize.query(`ALTER TABLE \`${gcnKhTbl}\` MODIFY COLUMN \`maNhanHieu\` INT NULL;`).catch(() => {});
-            await sequelize.query(`ALTER TABLE \`${gcnKhTbl}\` ADD COLUMN \`ngayNopYCTuyenThe\` DATE NULL;`).catch(() => {});
-            await sequelize.query(`ALTER TABLE \`${gcnKhTbl}\` ADD COLUMN \`loaiTuyenThe\` VARCHAR(255) NULL;`).catch(() => {});
-            await sequelize.query(`ALTER TABLE \`${gcnKhTbl}\` ADD COLUMN \`ngayGhiNhanTuyenThe\` DATE NULL;`).catch(() => {});
-            await sequelize.query(`ALTER TABLE \`${affidavitTbl}\` ADD COLUMN \`loaiTuyenThe\` VARCHAR(255) NULL;`).catch(() => {});
-        } catch (schemaErr) {
-            console.error("⚠️ GCN_NH_KH / Affidavit schema migration warning:", schemaErr?.message);
-        }
-
-        // Backfill loaiDon mặc định = 1 cho DonDangKyNhanHieu_KH nếu NULL hoặc 0 (trừ đơn sửa đổi / đơn tách)
-        try {
-            const donKhTbl = await resolveTableName("DonDangKyNhanHieu_KH");
-            const sdKhTbl = await resolveTableName("DonSuaDoi_NH_KH");
-            const tachKhTbl = await resolveTableName("DonTachNH_KH");
-            await sequelize.query(`
-                UPDATE \`${donKhTbl}\` d
-                INNER JOIN \`${sdKhTbl}\` sd ON d.\`maDonDangKy\` = sd.\`maDonDangKy\`
-                SET d.\`loaiDon\` = 2
-                WHERE d.\`loaiDon\` IS NULL OR d.\`loaiDon\` = 0;
-            `).catch(() => {});
-            await sequelize.query(`
-                UPDATE \`${donKhTbl}\` d
-                INNER JOIN \`${tachKhTbl}\` td ON d.\`maDonDangKy\` = td.\`maDonDangKy\`
-                SET d.\`loaiDon\` = 3
-                WHERE d.\`loaiDon\` IS NULL OR d.\`loaiDon\` = 0;
-            `).catch(() => {});
-            await sequelize.query(`
-                UPDATE \`${donKhTbl}\` d
-                LEFT JOIN \`${sdKhTbl}\` sd ON d.\`maDonDangKy\` = sd.\`maDonDangKy\`
-                LEFT JOIN \`${tachKhTbl}\` td ON d.\`maDonDangKy\` = td.\`maDonDangKy\`
-                SET d.\`loaiDon\` = 1
-                WHERE (d.\`loaiDon\` IS NULL OR d.\`loaiDon\` = 0)
-                  AND sd.\`maDonDangKy\` IS NULL
-                  AND td.\`maDonDangKy\` IS NULL;
-            `).catch(() => {});
-        } catch (khLoaiDonErr) {
-            console.error("⚠️ DonDangKyNhanHieu_KH loaiDon backfill warning:", khLoaiDonErr?.message);
-        }
     } catch (err) {
         console.error("Database sync error:", err);
     }
@@ -731,6 +476,10 @@ DonSuaDoi_NH_VN.belongsTo(DonDangKy, {
   as: "donMoi",
 });
 
+DonSuaDoi_NH_VN.hasMany(LichSuPhanHoiSuaDoi_NH_VN, { foreignKey: "idDonSuaDoi", as: "lichSuPhanHoi", onDelete: "CASCADE", hooks: true });
+LichSuPhanHoiSuaDoi_NH_VN.belongsTo(DonSuaDoi_NH_VN, { foreignKey: "idDonSuaDoi", as: "donSuaDoi" });
+DonSuaDoi_NH_VN.belongsTo(GiayUyQuyen, { foreignKey: "idGUQ", as: "giayUyQuyen" });
+
 DonDangKyNhanHieu_KH.hasOne(DonSuaDoi_NH_KH, {
   foreignKey: "maDonDangKy",   // nằm bên bảng DonSuaDoi_NH_KH
   sourceKey: "maDonDangKy",
@@ -742,6 +491,28 @@ DonSuaDoi_NH_KH.belongsTo(DonDangKyNhanHieu_KH, {
   targetKey: "maDonDangKy",
   as: "don_KH",
 });
+
+DonDangKyNhanHieu_KH.hasMany(DonSuaDoi_NH_KH, {
+  foreignKey: "maDonDangKyGoc",
+  sourceKey: "maDonDangKy",
+  as: "dsSuaDoi_KH_Goc",
+});
+
+DonSuaDoi_NH_KH.belongsTo(DonDangKyNhanHieu_KH, {
+  foreignKey: "maDonDangKyGoc",
+  targetKey: "maDonDangKy",
+  as: "donGoc",
+});
+
+DonSuaDoi_NH_KH.belongsTo(DonDangKyNhanHieu_KH, {
+  foreignKey: "maDonDangKy",
+  targetKey: "maDonDangKy",
+  as: "donMoi",
+});
+
+DonSuaDoi_NH_KH.hasMany(LichSuPhanHoiSuaDoi_NH_KH, { foreignKey: "idDonSuaDoi", as: "lichSuPhanHoi", onDelete: "CASCADE", hooks: true });
+LichSuPhanHoiSuaDoi_NH_KH.belongsTo(DonSuaDoi_NH_KH, { foreignKey: "idDonSuaDoi", as: "donSuaDoi" });
+DonSuaDoi_NH_KH.belongsTo(GiayUyQuyen, { foreignKey: "idGUQ", as: "giayUyQuyen" });
 
 DonDangKyNhanHieu_KH.belongsTo(GiayUyQuyen, { foreignKey: "idGUQ", targetKey: "id", as: "GiayUyQuyen" });
 GiayUyQuyen.hasMany(DonDangKyNhanHieu_KH, { foreignKey: "idGUQ", as: "DonDangKyNhanHieu_KH" });
@@ -864,6 +635,63 @@ DonCQSH_VN.belongsTo(KhachHangCuoi, {
     targetKey: "id",
     as: "khachHangMoi",
 });
+DonCQSH_VN.belongsTo(GiayUyQuyen, {
+    foreignKey: "idGUQ",
+    targetKey: "id",
+    as: "giayUyQuyen",
+});
+DonCQSH_VN.hasMany(LichSuPhanHoiCQSH_NH_VN, {
+    foreignKey: "idDonCQSH",
+    as: "phanHoiList",
+    onDelete: "CASCADE",
+    hooks: true,
+});
+LichSuPhanHoiCQSH_NH_VN.belongsTo(DonCQSH_VN, {
+    foreignKey: "idDonCQSH",
+    as: "donCQSH",
+});
+
+// ========= Quan hệ Chuyển quyền sở hữu Đơn đăng ký KH (DonCQSH_KH) =========
+DonDangKyNhanHieu_KH.hasMany(DonCQSH_KH, {
+    foreignKey: "maDonDangKyGoc",
+    sourceKey: "maDonDangKy",
+    as: "DonCQSH_KH",
+});
+DonDangKyNhanHieu_KH.hasOne(DonCQSH_KH, {
+    foreignKey: "maDonDangKy",
+    sourceKey: "maDonDangKy",
+    as: "donCQSH_KH",
+});
+DonCQSH_KH.belongsTo(DonDangKyNhanHieu_KH, {
+    foreignKey: "maDonDangKyGoc",
+    targetKey: "maDonDangKy",
+    as: "donGoc",
+});
+DonCQSH_KH.belongsTo(DonDangKyNhanHieu_KH, {
+    foreignKey: "maDonDangKy",
+    targetKey: "maDonDangKy",
+    as: "donMoi",
+});
+DonCQSH_KH.belongsTo(KhachHangCuoi, {
+    foreignKey: "idKhachHang",
+    targetKey: "id",
+    as: "khachHangMoi",
+});
+DonCQSH_KH.belongsTo(GiayUyQuyen, {
+    foreignKey: "idGUQ",
+    targetKey: "id",
+    as: "giayUyQuyen",
+});
+DonCQSH_KH.hasMany(LichSuPhanHoiCQSH_NH_KH, {
+    foreignKey: "idDonCQSH",
+    as: "phanHoiList",
+    onDelete: "CASCADE",
+    hooks: true,
+});
+LichSuPhanHoiCQSH_NH_KH.belongsTo(DonCQSH_KH, {
+    foreignKey: "idDonCQSH",
+    as: "donCQSH",
+});
 
 // ========= Quan hệ Chuyển quyền sở hữu Giấy chứng nhận (DonCQSH_GCN_VN) =========
 GCN_NH.hasMany(DonCQSH_GCN_VN, {
@@ -920,6 +748,14 @@ export {
     DonGiaHan_NH_KH,
     TaiLieuGH_NH_KH,
     DonSuaDoi_NH_VN,
+    LichSuPhanHoiSuaDoi_NH_VN,
+    DonDangKyNhanHieu_KH,
+    DonDK_SPDV_KH,
+    TaiLieu_KH,
+    LichSuThamDinh_KH,
+    LichSuGiaHan_KH,
+    DonSuaDoi_NH_KH,
+    LichSuPhanHoiSuaDoi_NH_KH,
     TuVanChung_VN,
     TuVanChung_KH,
     DonTachNH_VN,
@@ -934,5 +770,9 @@ export {
     DonSuaDoiGCN_NH_KH,
     DonCQSH_VN,
     DonCQSH_NH_VN,
+    LichSuPhanHoiCQSH_NH_VN,
+    DonCQSH_KH,
+    DonCQSH_NH_KH,
+    LichSuPhanHoiCQSH_NH_KH,
     DonCQSH_GCN_VN,
 };

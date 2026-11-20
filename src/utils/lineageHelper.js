@@ -256,7 +256,7 @@ export const getDonPendingBienDongMap = async (maDonList) => {
                 maDonDangKyGoc: { [Op.in]: maDonList },
                 trangThaiDuyet: 0,
             },
-            attributes: ["id", "maDonDangKyGoc", "soDon", "ngayYeuCau", "lanSuaDoi", "moTa", "trangThaiDuyet", "duLieuThayDoi"],
+            attributes: ["id", "maDonDangKyGoc", "soDon", "ngayYeuCau", "lanSuaDoi", "hanTraLoi", "moTa", "trangThaiDuyet", "duLieuThayDoi"],
             raw: true,
         }).catch(() => []),
         DonCQSH_VN.findAll({
@@ -264,7 +264,7 @@ export const getDonPendingBienDongMap = async (maDonList) => {
                 maDonDangKyGoc: { [Op.in]: maDonList },
                 trangThaiDuyet: 0,
             },
-            attributes: ["id", "maDonDangKyGoc", "soDon", "ngayYeuCau", "lanChuyenQuyen", "idKhachHang", "noiDung", "moTa", "trangThaiDuyet", "duLieuThayDoi"],
+            attributes: ["id", "maDonDangKyGoc", "soDon", "ngayYeuCau", "lanChuyenQuyen", "hanTraLoi", "idKhachHang", "noiDung", "moTa", "trangThaiDuyet", "duLieuThayDoi"],
             raw: true,
         }).catch(() => []),
     ]);
@@ -294,6 +294,7 @@ export const getDonPendingBienDongMap = async (maDonList) => {
                 soDon: sd.soDon,
                 ngayYeuCau: sd.ngayYeuCau,
                 lanBienDong: sd.lanSuaDoi,
+                hanTraLoi: sd.hanTraLoi || null,
                 moTa: sd.moTa,
                 trangThaiDuyet: 0,
             };
@@ -310,10 +311,11 @@ export const getDonPendingBienDongMap = async (maDonList) => {
             const item = {
                 id: cq.id,
                 loaiBienDong: "CHUYEN_QUYEN",
-                tenBienDong: "Đang chuyển quyền",
+                tenBienDong: "Đơn chuyển quyền sở hữu",
                 soDon: cq.soDon,
                 ngayYeuCau: cq.ngayYeuCau,
                 lanBienDong: cq.lanChuyenQuyen,
+                hanTraLoi: cq.hanTraLoi || null,
                 idKhachHangMoi: cq.idKhachHang,
                 noiDung: cq.noiDung,
                 moTa: cq.moTa,

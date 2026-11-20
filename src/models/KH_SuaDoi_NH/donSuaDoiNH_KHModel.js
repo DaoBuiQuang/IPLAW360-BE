@@ -12,7 +12,7 @@ export const DonSuaDoi_NH_KH = sequelize.define("DonSuaDoi_NH_KH", {
     },
     maDonDangKy: {
         type: DataTypes.STRING,
-        allowNull: false,
+        allowNull: true,
         references: {
             model: DonDangKyNhanHieu_KH,
             key: "maDonDangKy",
@@ -108,7 +108,60 @@ export const DonSuaDoi_NH_KH = sequelize.define("DonSuaDoi_NH_KH", {
         allowNull: false,
         defaultValue: false, // false = nhập tay, true = nhập máy
         comment: 'Phân biệt dữ liệu nhập tay hoặc nhập tự động'
-    }
+    },
+    trangThaiDuyet: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        comment: '0: Chưa chấp thuận, 1: Được chấp thuận, 2: Từ chối',
+    },
+    ngayChapThuan: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+    },
+    ngayTuChoi: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+    },
+    lyDoTuChoi: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+    },
+    duLieuThayDoi: {
+        type: DataTypes.JSON,
+        allowNull: true,
+    },
+    ndSuaDoiNoiDungKhac: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+    },
+    giayUyQuyenGoc: {
+        type: DataTypes.BOOLEAN,
+        allowNull: true,
+        comment: 'GUQ bản gốc (1) / bản sao (0)',
+    },
+    maUyQuyen: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        comment: 'Số đơn chứa GUQ gốc (nếu dùng bản sao)',
+    },
+    idGUQ: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: "GiayUyQuyen", key: "id" },
+        onDelete: "SET NULL",
+    },
+    hanTraLoi: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        comment: 'Hạn trả lời Cục hiện hành (vòng thông báo mới nhất chưa trả lời)',
+    },
+    tuDongTuChoi: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        comment: 'Hệ thống tự chuyển Từ chối do quá hạn trả lời',
+    },
 }, {
     timestamps: true,
     tableName: "DonSuaDoi_NH_KH",

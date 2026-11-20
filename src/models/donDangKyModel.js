@@ -26,7 +26,7 @@ export const DonDangKy = sequelize.define("DonDangKy", {
     },
     idKhachHang: {
         type: DataTypes.INTEGER,
-        allowNull: false,
+        allowNull: true,
         references: {
             model: KhachHangCuoi,
             key: "id",
@@ -285,6 +285,12 @@ export const DonDangKy = sequelize.define("DonDangKy", {
         allowNull: false,
         defaultValue: false, // false = nhập tay, true = nhập máy
         comment: 'Phân biệt dữ liệu nhập tay hoặc nhập tự động'
+    },
+    laDonTiepNhan: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        comment: '1: Đơn tiếp nhận từ đại diện khác'
     }
 }, {
     timestamps: true,

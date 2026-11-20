@@ -130,8 +130,41 @@ export const DonSuaDoi_NH_VN = sequelize.define("DonSuaDoi_NH_VN", {
     duLieuThayDoi: {
         type: DataTypes.JSON,
         allowNull: true,
-    }
+    },
+    ndSuaDoiNoiDungKhac: {
+        type: DataTypes.TEXT,
+        allowNull: true,
+    },
+    giayUyQuyenGoc: {
+        type: DataTypes.BOOLEAN,
+        allowNull: true,
+        comment: 'GUQ bản gốc (1) / bản sao (0)',
+    },
+    maUyQuyen: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        comment: 'Số đơn chứa GUQ gốc (nếu dùng bản sao)',
+    },
+    idGUQ: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: "GiayUyQuyen", key: "id" },
+        onDelete: "SET NULL",
+    },
+    hanTraLoi: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        comment: 'Hạn trả lời Cục hiện hành (vòng thông báo mới nhất chưa trả lời)',
+    },
+    tuDongTuChoi: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        comment: 'Hệ thống tự chuyển Từ chối do quá hạn trả lời',
+    },
 }, {
     timestamps: true,
     tableName: "DonSuaDoi_NH_VN",
+    // Index (idx_sd_don_madondangky, idx_sd_don_status_hantraloi) được tạo trong migration SQL
+    // và đảm bảo idempotent bởi syncDatabase() sau sync() để tránh lỗi khi cột chưa tồn tại.
 });

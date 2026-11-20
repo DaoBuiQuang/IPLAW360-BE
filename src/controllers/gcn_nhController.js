@@ -786,16 +786,19 @@ export const getGCN_NHDetail = async (req, res) => {
                 {
                     model: NhanHieu,
                     as: "NhanHieu",
+                    required: false,
                     attributes: ["tenNhanHieu", "linkAnh"],
                 },
                 {
                     model: KhachHangCuoi,
                     as: "KhachHangCuoi",
+                    required: false,
                     attributes: ["tenKhachHang", "diaChi"],
                 },
                 {
                     model: DoiTac,
                     as: "DoiTac",
+                    required: false,
                     attributes: ["tenDoiTac"],
                 },
             ],
@@ -1009,16 +1012,19 @@ export const getGCN_NH_CAMDetail = async (req, res) => {
                 {
                     model: NhanHieu,
                     as: "NhanHieu",
+                    required: false,
                     attributes: ["tenNhanHieu", "linkAnh"],
                 },
                 {
                     model: KhachHangCuoi,
                     as: "KhachHangCuoi",
+                    required: false,
                     attributes: ["tenKhachHang", "diaChi"],
                 },
                 {
                     model: DoiTac,
                     as: "DoiTac",
+                    required: false,
                     attributes: ["tenDoiTac"],
                 },
             ],
@@ -1150,42 +1156,67 @@ export const addGCN_NH_VN = async (req, res) => {
             hanGiaHan,
             hanGiaHanBang,
             hanNopTuyenThe,
+            trangThaiBang,
+            quyetDinhSo,
+            clientsRef,
+            clientRef,
+            anhBang,
             anhBangBase64, // Ảnh từ FE
             vuViecs,
             maNhanSuCapNhap,
             idGUQ
         } = req.body;
 
-        // ✅ Kiểm tra đầu vào bắt buộc
-        if (!soBang || !maNhanHieu) {
+        // ✅ Kiểm tra đầu vào bắt buộc (chỉ bắt buộc số bằng; không bắt buộc maNhanHieu / idKhachHang)
+        const cleanSoBang = soBang !== undefined && soBang !== null ? String(soBang).trim() : "";
+        if (!cleanSoBang) {
             await transaction.rollback();
             return res.status(400).json({
-                message: "Thiếu thông tin bắt buộc: số bằng hoặc mã nhãn hiệu!",
+                message: "Thiếu thông tin bắt buộc: số bằng!",
             });
         }
 
         // ✅ Kiểm tra trùng số bằng
-        const existed = await GCN_NH.findOne({ where: { soBang } });
+        const existed = await GCN_NH.findOne({ where: { soBang: cleanSoBang }, transaction });
         if (existed) {
             await transaction.rollback();
             return res.status(400).json({
-                message: `Số bằng "${soBang}" đã tồn tại trong hệ thống!`,
+                message: `Số bằng "${cleanSoBang}" đã tồn tại trong hệ thống!`,
             });
         }
 
-        // ✅ Kiểm tra hoặc tạo mới nhãn hiệu
-        let nhanHieu = await NhanHieu.findOne({ where: { maNhanHieu } });
-        if (!nhanHieu) {
-            nhanHieu = await NhanHieu.create(
-                {
-                    maNhanHieu,
-                    tenNhanHieu: tenNhanHieu || null,
-                },
-                { transaction }
-            );
+        // ✅ Kiểm tra hoặc tạo mới nhãn hiệu (chỉ khi có maNhanHieu, tương tự addGCN_NH_Cam)
+        let resolvedMaNhanHieu = null;
+        if (maNhanHieu !== undefined && maNhanHieu !== null && String(maNhanHieu).trim() !== "") {
+            let nhanHieu = await NhanHieu.findOne({ where: { maNhanHieu }, transaction });
+            if (!nhanHieu) {
+                nhanHieu = await NhanHieu.create(
+                    {
+                        maNhanHieu,
+                        tenNhanHieu: tenNhanHieu || null,
+                    },
+                    { transaction }
+                );
+            }
+            resolvedMaNhanHieu = nhanHieu.maNhanHieu;
         }
-        if (idGUQ) {
-            const guq = await GiayUyQuyen.findByPk(idGUQ, { transaction });
+
+        const cleanIdKhachHang =
+            idKhachHang !== undefined && idKhachHang !== null && String(idKhachHang).trim() !== ""
+                ? Number(idKhachHang)
+                : null;
+        const cleanIdDoiTac =
+            idDoiTac !== undefined && idDoiTac !== null && String(idDoiTac).trim() !== ""
+                ? Number(idDoiTac)
+                : null;
+        const cleanIdGUQ =
+            idGUQ !== undefined && idGUQ !== null && String(idGUQ).trim() !== ""
+                ? Number(idGUQ)
+                : null;
+        const cleanMaHoSo = maHoSo && String(maHoSo).trim() !== "" ? String(maHoSo).trim() : null;
+
+        if (cleanIdGUQ) {
+            const guq = await GiayUyQuyen.findByPk(cleanIdGUQ, { transaction });
 
             if (guq) {
                 const isEmptySoDonGoc =
@@ -1210,30 +1241,33 @@ export const addGCN_NH_VN = async (req, res) => {
 
         const newGCN = await GCN_NH.create(
             {
-                soBang,
-                soDon,
-                maHoSo,
-                ghiChu,
-                dsNhomSPDV,
+                soBang: cleanSoBang,
+                soDon: soDon || null,
+                maHoSo: cleanMaHoSo,
+                ghiChu: ghiChu || null,
+                dsNhomSPDV: dsNhomSPDV || null,
                 ngayNopDon: ngayNopDon || null,
                 ngayCapBang: ngayCapBang || null,
                 ngayHetHanBang: resolvedDates.ngayHetHanBang,
-                chiTietNhomSPDV,
+                chiTietNhomSPDV: chiTietNhomSPDV || null,
                 hanGiaHan: resolvedDates.hanGiaHan,
-                hanNopTuyenThe: hanNopTuyenThe || null,
+                trangThaiBang: trangThaiBang || null,
+                quyetDinhSo: quyetDinhSo || null,
+                clientsRef: clientsRef ?? clientRef ?? null,
                 maQuocGia: "VN", // quốc gia cố định
-                idKhachHang: idKhachHang || null,
-                idDoiTac: idDoiTac || null,
-                maNhanHieu: nhanHieu.maNhanHieu,
-                anhBangBase64: anhBangBase64 || null,
+                idKhachHang: cleanIdKhachHang,
+                idDoiTac: cleanIdDoiTac,
+                maNhanHieu: resolvedMaNhanHieu,
+                anhBang: anhBang ?? anhBangBase64 ?? null,
                 mauSacNH: mauSacNH || null,
-                idGUQ: idGUQ || null,
+                idGUQ: cleanIdGUQ,
+                maNhanSuCapNhap: req.user?.maNhanSu || maNhanSuCapNhap || null,
             },
             { transaction }
         );
 
-        // ✅ Tạo các vụ việc nếu có
-        if (Array.isArray(vuViecs) && vuViecs.length > 0) {
+        // ✅ Tạo các vụ việc nếu có (và có đủ maHoSo & idKhachHang)
+        if (Array.isArray(vuViecs) && vuViecs.length > 0 && cleanMaHoSo && cleanIdKhachHang) {
             for (const vuViec of vuViecs) {
                 let ngayXuatBill = null;
                 let maNguoiXuatBill = null;
@@ -1247,10 +1281,10 @@ export const addGCN_NH_VN = async (req, res) => {
                         tenVuViec: vuViec.tenVuViec,
                         moTa: vuViec.moTa,
                         trangThai: vuViec.trangThai,
-                        maHoSo,
+                        maHoSo: cleanMaHoSo,
                         maDon: newGCN.id,
-                        soDon: soDon,
-                        idKhachHang: idKhachHang,
+                        soDon: soDon || null,
+                        idKhachHang: cleanIdKhachHang,
                         maQuocGiaVuViec: "VN",
                         ngayTaoVV: new Date(),
                         maNguoiXuLy: vuViec.maNguoiXuLy,
@@ -1713,9 +1747,9 @@ export const editGCN_NH_CAM = async (req, res) => {
                 "ngayHetHanBang",
             ],
             include: [
-                { model: NhanHieu, as: "NhanHieu", attributes: ["tenNhanHieu", "linkAnh"] },
-                { model: KhachHangCuoi, as: "KhachHangCuoi", attributes: ["tenKhachHang", "diaChi"] },
-                { model: DoiTac, as: "DoiTac", attributes: ["tenDoiTac"] },
+                { model: NhanHieu, as: "NhanHieu", required: false, attributes: ["tenNhanHieu", "linkAnh"] },
+                { model: KhachHangCuoi, as: "KhachHangCuoi", required: false, attributes: ["tenKhachHang", "diaChi"] },
+                { model: DoiTac, as: "DoiTac", required: false, attributes: ["tenDoiTac"] },
             ],
         });
 
@@ -1754,17 +1788,19 @@ export const editGCN_NH_VN = async (req, res) => {
             maQuocGia,
             quyetDinhSo,
             ngayHetHanBang,
+            trangThaiBang,
             vuViecs,
             idGUQ,
             maNhanSuCapNhap, // nếu có truyền từ frontend
         } = req.body;
 
         if (!id) {
+            await t.rollback();
             return res.status(400).json({ message: "Thiếu ID văn bằng cần chỉnh sửa" });
         }
 
         // ✅ Tìm bản ghi chính
-        const record = await GCN_NH.findByPk(id);
+        const record = await GCN_NH.findByPk(id, { transaction: t });
         if (!record) {
             await t.rollback();
             return res.status(404).json({ message: "Không tìm thấy văn bằng cần chỉnh sửa" });
@@ -1785,11 +1821,30 @@ export const editGCN_NH_VN = async (req, res) => {
             hanGiaHan: hanGiaHan !== undefined ? hanGiaHan : record.hanGiaHan,
         });
 
+        const cleanIdKhachHang =
+            idKhachHang === undefined
+                ? undefined
+                : idKhachHang !== null && String(idKhachHang).trim() !== ""
+                ? Number(idKhachHang)
+                : null;
+        const cleanMaNhanHieu =
+            maNhanHieu === undefined
+                ? undefined
+                : maNhanHieu !== null && String(maNhanHieu).trim() !== ""
+                ? Number(maNhanHieu)
+                : null;
+        const cleanMaHoSo =
+            maHoSo === undefined
+                ? undefined
+                : maHoSo && String(maHoSo).trim() !== ""
+                ? String(maHoSo).trim()
+                : null;
+
         await record.update(
             {
                 soBang,
                 soDon,
-                maHoSo,
+                maHoSo: cleanMaHoSo,
                 ngayNopDon,
                 ngayCapBang,
                 ghiChu,
@@ -1798,11 +1853,12 @@ export const editGCN_NH_VN = async (req, res) => {
                 mauSacNH,
                 anhBang: linkAnh,
                 hanGiaHan: resolvedDatesVNEdit.hanGiaHan,
-                idKhachHang,
+                idKhachHang: cleanIdKhachHang,
                 idDoiTac,
-                maNhanHieu,
+                maNhanHieu: cleanMaNhanHieu,
                 maQuocGia,
                 quyetDinhSo,
+                trangThaiBang,
                 ngayHetHanBang: resolvedDatesVNEdit.ngayHetHanBang,
                 idGUQ,
             },
@@ -1810,9 +1866,10 @@ export const editGCN_NH_VN = async (req, res) => {
         );
 
         // ==================== Đồng bộ danh sách Vụ Việc ====================
-        if (Array.isArray(vuViecs)) {
+        const effectiveMaHoSo = record.maHoSo;
+        if (Array.isArray(vuViecs) && effectiveMaHoSo) {
             const vuViecsHienTai = await VuViec.findAll({
-                where: { maHoSo },
+                where: { maHoSo: effectiveMaHoSo },
                 transaction: t,
             });
 
@@ -1919,9 +1976,9 @@ export const editGCN_NH_VN = async (req, res) => {
                 "ngayHetHanBang",
             ],
             include: [
-                { model: NhanHieu, as: "NhanHieu", attributes: ["tenNhanHieu", "linkAnh"] },
-                { model: KhachHangCuoi, as: "KhachHangCuoi", attributes: ["tenKhachHang", "diaChi"] },
-                { model: DoiTac, as: "DoiTac", attributes: ["tenDoiTac"] },
+                { model: NhanHieu, as: "NhanHieu", required: false, attributes: ["tenNhanHieu", "linkAnh"] },
+                { model: KhachHangCuoi, as: "KhachHangCuoi", required: false, attributes: ["tenKhachHang", "diaChi"] },
+                { model: DoiTac, as: "DoiTac", required: false, attributes: ["tenDoiTac"] },
             ],
         });
 
