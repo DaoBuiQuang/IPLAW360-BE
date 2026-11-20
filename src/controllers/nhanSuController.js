@@ -5,11 +5,14 @@ import { Sequelize, Op } from "sequelize";
 import { sendGenericNotification } from "../utils/notificationHelper.js";
 import { ACCOUNT_ROLES, isTimesheetOnlyRole } from "../utils/accountRoles.js";
 
+const normalizeEmail = (email) =>
+    email && String(email).trim() !== "" ? String(email).trim().toLowerCase() : null;
+
 export const getNhanSuBasicList = async (req, res) => {
     try {
         const nhanSuList = await NhanSu.findAll({
             ...(isTimesheetOnlyRole(req.user?.role) ? { where: { maNhanSu: req.user.maNhanSu } } : {}),
-            attributes: ["maNhanSu", "hoTen"] 
+            attributes: ["maNhanSu", "hoTen", "email", "chucVu", "phongBan"] 
         });
         res.status(200).json(nhanSuList || []);
     } catch (error) {
@@ -24,20 +27,29 @@ export const createNhanSu = async (req, res) => {
         if (!maNhanSu || !hoTen) {
             return res.status(400).json({ message: "Mã nhân sự và họ tên là bắt buộc" });
         }
-        // const existingNhanSu = await NhanSu.findOne({ where: { maNhanSu } });
-        // if (existingNhanSu) {
-        //     return res.status(409).json({ message: "Mã nhân sự đã tồn tại" });
-        // }
 
-        const newNhanSu = await NhanSu.create({ maNhanSu, hoTen, chucVu, phongBan, sdt, email, ngayThangNamSinh, cccd, bangCap, hourlyRate });
+        const normalizedEmail = normalizeEmail(email);
+        const newNhanSu = await NhanSu.create({
+            maNhanSu,
+            hoTen,
+            chucVu,
+            phongBan,
+            sdt,
+            email: normalizedEmail,
+            ngayThangNamSinh,
+            cccd,
+            bangCap,
+            hourlyRate,
+        });
 
         res.status(201).json({ message: "Thêm nhân viên thành công", nhanSu: newNhanSu });
     } catch (error) {
         if (error instanceof Sequelize.UniqueConstraintError) {
             let message = "Dữ liệu đã tồn tại";
-            const field = error.errors[0].path;
+            const field = error.errors?.[0]?.path;
             if (field === "maNhanSu") message = "Mã nhân sự đã tồn tại.";
             if (field === "hoTen") message = "Tên nhân sự đã tồn tại.";
+            if (field === "email") message = "Email đã tồn tại.";
             return res.status(409).json({ message });
         }
         res.status(500).json({ message: error.message });
@@ -59,8 +71,9 @@ export const updateNhanSu = async (req, res) => {
             return res.status(404).json({ message: "Nhân viên không tồn tại" });
         }
 
+        const normalizedEmail = email !== undefined ? normalizeEmail(email) : undefined;
         const fieldsToUpdate = {
-            hoTen, chucVu, phongBan, sdt, email,
+            hoTen, chucVu, phongBan, sdt, email: normalizedEmail,
             ngayThangNamSinh, cccd, bangCap, hourlyRate, maNhanSuCapNhap
         };
 
@@ -99,9 +112,10 @@ export const updateNhanSu = async (req, res) => {
     } catch (error) {
         if (error instanceof Sequelize.UniqueConstraintError) {
             let message = "Dữ liệu đã tồn tại";
-            const field = error.errors[0].path;
+            const field = error.errors?.[0]?.path;
             if (field === "maNhanSu") message = "Mã nhân sự đã tồn tại.";
             if (field === "hoTen") message = "Tên nhân sự đã tồn tại.";
+            if (field === "email") message = "Email đã tồn tại.";
             return res.status(409).json({ message });
         }
         res.status(500).json({ message: error.message });
@@ -139,7 +153,20 @@ export const deleteNhanSu = async (req, res) => {
 // Lấy danh sách nhân viên kèm theo tên tài khoản
 export const getNhanSuList = async (req, res) => {
     try {
+        const rawSearch = req.body?.hoTen ?? req.query?.hoTen;
+        const keyword = rawSearch && String(rawSearch).trim() !== "" ? String(rawSearch).trim() : null;
+        const whereCondition = keyword
+            ? {
+                  [Op.or]: [
+                      { hoTen: { [Op.like]: `%${keyword}%` } },
+                      { email: { [Op.like]: `%${keyword}%` } },
+                      { maNhanSu: { [Op.like]: `%${keyword}%` } },
+                  ],
+              }
+            : undefined;
+
         const nhanSuList = await NhanSu.findAll({
+            where: whereCondition,
             include: [
                 {
                     model: Auth,
@@ -150,6 +177,7 @@ export const getNhanSuList = async (req, res) => {
         });
 
         if (nhanSuList.length === 0) {
+            if (keyword) return res.status(200).json([]);
             return res.status(404).json({ message: "Không có nhân viên nào" });
         }
 
@@ -247,7 +275,7 @@ export const getMyTeam = async (req, res) => {
                 {
                     model: NhanSu,
                     as: "manager",
-                    attributes: ["maNhanSu", "hoTen", "chucVu"],
+                    attributes: ["maNhanSu", "hoTen", "chucVu", "email"],
                 },
             ],
         });

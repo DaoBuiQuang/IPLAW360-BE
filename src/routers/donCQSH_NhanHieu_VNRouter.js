@@ -5,6 +5,8 @@ import {
     getApplicationCQ_VNDetail,
     updateApplicationCQ_VN,
     deleteApplicationCQ_VN,
+    savePhanHoiCQSH_VN,
+    deletePhanHoiCQSH_VN,
     addGCN_CQ_NHVN,
     getAllGCN_CQ_VN,
     getGCN_CQ_VNDetail,
@@ -34,6 +36,12 @@ router.post(
 
 router.post(
     "/application_cq_nh_vn/detail",
+    authenticateUser,
+    authorizeRoles("admin", "staff", "trainee"),
+    getApplicationCQ_VNDetail
+);
+router.get(
+    "/application_cq_nh_vn/detail/:id",
     authenticateUser,
     authorizeRoles("admin", "staff", "trainee"),
     getApplicationCQ_VNDetail
@@ -72,6 +80,32 @@ router.post(
     authenticateUser,
     authorizeRoles("admin", "staff"),
     deleteApplicationCQ_VN
+);
+router.delete(
+    "/application_cq_nh_vn/delete/:id",
+    authenticateUser,
+    authorizeRoles("admin", "staff"),
+    deleteApplicationCQ_VN
+);
+
+router.post(
+    "/application_cq_nh_vn/phan-hoi/save",
+    authenticateUser,
+    authorizeRoles("admin", "staff"),
+    savePhanHoiCQSH_VN
+);
+
+router.post(
+    "/application_cq_nh_vn/phan-hoi/delete",
+    authenticateUser,
+    authorizeRoles("admin", "staff"),
+    deletePhanHoiCQSH_VN
+);
+router.delete(
+    "/application_cq_nh_vn/phan-hoi/:phanHoiId",
+    authenticateUser,
+    authorizeRoles("admin", "staff"),
+    deletePhanHoiCQSH_VN
 );
 
 // =========================================================

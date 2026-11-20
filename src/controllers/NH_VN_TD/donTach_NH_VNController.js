@@ -10,6 +10,7 @@ import { DoiTac, DonTachNH_KH, KhachHangCuoi, NhanHieu, TaiLieu } from "../../mo
 import { Op, literal, Sequelize } from "sequelize";
 import { TaiLieu_KH } from "../../models/KH/taiLieuKH_Model.js";
 import { createChildDonSafely } from "../NH_VN_SD/donSuaDoi_NH_VNController.js";
+import { createChildDonKHSafely } from "../KH/donSuaDoi_NH_KHController.js";
 import { getDonPendingBienDongMap } from "../../utils/lineageHelper.js";
 
 // Helper for token-based substring search (case-insensitive)
@@ -290,13 +291,19 @@ export const tachDonDangKy_KH = async (req, res) => {
             return res.status(404).json({ message: "Không tìm thấy đơn gốc." });
         }
 
-        const effectiveMaHoSo = maHoSo || donCu.maHoSo || donCu.maHoSoVuViec;
+        const effectiveMaHoSo = maHoSo || donCu.maHoSo || donCu.maHoSoVuViec || null;
 
-        // Lấy toàn bộ SPDV của đơn gốc
-        const spdvCu = await DonDK_SPDV_KH.findAll({
-            where: { maDonDangKy: targetMaDonGoc },
-            transaction,
-        });
+        // Lấy toàn bộ SPDV & Tài liệu của đơn gốc
+        const [spdvCu, taiLieuCu] = await Promise.all([
+            DonDK_SPDV_KH.findAll({
+                where: { maDonDangKy: targetMaDonGoc },
+                transaction,
+            }),
+            TaiLieu_KH.findAll({
+                where: { maDonDangKy: targetMaDonGoc },
+                transaction,
+            }),
+        ]);
 
         const existingSplitCount = await DonTachNH_KH.count({
             where: { maDonDangKyGoc: targetMaDonGoc },
@@ -313,7 +320,10 @@ export const tachDonDangKy_KH = async (req, res) => {
                 .filter(Boolean);
 
             // ====== 1) TẠO MÃ ĐƠN MỚI & NGÀY NỘP ĐƠN MỚI ======
-            const maDonDangKyMoi = generateMaDonDangKy(effectiveMaHoSo);
+            const maDonPrefix =
+                effectiveMaHoSo ||
+                (donCu.soDon ? `TD_KH_${String(donCu.soDon).replace(/[^a-zA-Z0-9]/g, "")}` : "TD_KH");
+            const maDonDangKyMoi = generateMaDonDangKy(maDonPrefix);
             const ngayNopDonMoi =
                 item.ngayNopDon ||
                 item.ngayYeuCau ||
@@ -328,19 +338,19 @@ export const tachDonDangKy_KH = async (req, res) => {
 
             const resetProgressFields = buildResetSplitProgressFields(item, ngayNopDonMoi);
 
-            // ====== 2) TẠO DON DANG KY MỚI ======
-            const donMoi = await DonDangKyNhanHieu_KH.create(
+            // ====== 2) TẠO DON DANG KY KH MỚI AN TOÀN (tránh lỗi unique maHoSoVuViec khi tách nhiều lần) ======
+            const donMoi = await createChildDonKHSafely(
                 {
                     ...basePlain,
                     ...resetProgressFields,
                     maDonDangKy: maDonDangKyMoi,
                     maHoSo: effectiveMaHoSo,
-                    maHoSoVuViec: effectiveMaHoSo || basePlain.maHoSoVuViec,
+                    maHoSoVuViec: effectiveMaHoSo,
                     loaiDon: 3, // 3 = tách đơn
                     donGoc: 0,
                     soDon: item.soDon,
                 },
-                { transaction }
+                transaction
             );
 
             // ====== 3) TẠO BẢN GHI DonTachNH_KH ======
@@ -360,7 +370,7 @@ export const tachDonDangKy_KH = async (req, res) => {
                 { transaction }
             );
 
-            // ====== 4) COPY SPDV TƯƠNG ỨNG ======
+            // ====== 4) COPY SPDV & TÀI LIỆU TƯƠNG ỨNG ======
             let spdvMoi = [];
             if (nhomSP.length > 0) {
                 const matchedFromParent = spdvCu.filter((sp) => nhomSP.includes(String(sp.maSPDV).trim()));
@@ -381,6 +391,18 @@ export const tachDonDangKy_KH = async (req, res) => {
 
             if (spdvMoi.length > 0) {
                 await DonDK_SPDV_KH.bulkCreate(spdvMoi, { transaction });
+            }
+
+            if (taiLieuCu.length > 0) {
+                await TaiLieu_KH.bulkCreate(
+                    taiLieuCu.map((tl) => ({
+                        maDonDangKy: maDonDangKyMoi,
+                        tenTaiLieu: tl.tenTaiLieu,
+                        linkTaiLieu: tl.linkTaiLieu,
+                        trangThai: tl.trangThai,
+                    })),
+                    { transaction }
+                );
             }
 
             danhSachDonMoi.push({
@@ -1055,6 +1077,15 @@ export const getAllApplicationTD_KH = async (req, res) => {
             row.soDonGoc = app.donTach_KH?.donGoc_KH?.soDon || null;
             row.ngayNopDonGoc = app.donTach_KH?.donGoc_KH?.ngayNopDon || null;
             row.dsNhomSPDV = app.donTach_KH?.dsNhomSPDV || null;
+            row.donCha = app.donTach_KH?.donGoc_KH
+                ? {
+                      maDonDangKy: app.donTach_KH.donGoc_KH.maDonDangKy,
+                      soDon: app.donTach_KH.donGoc_KH.soDon,
+                      ngayNopDon: app.donTach_KH.donGoc_KH.ngayNopDon,
+                      maHoSo: app.donTach_KH.donGoc_KH.maHoSo,
+                      maHoSoVuViec: app.donTach_KH.donGoc_KH.maHoSoVuViec,
+                  }
+                : null;
             return row;
         });
 
@@ -1126,6 +1157,66 @@ export const getApplicationTD_VNDetail = async (req, res) => {
         });
     } catch (error) {
         console.error("❌ Lỗi lấy chi tiết đơn tách:", error);
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+export const getApplicationTD_KHDetail = async (req, res) => {
+    try {
+        const { id, maDonDangKy, maDonDangKyGoc } = req.body || {};
+        const whereCondition = {};
+        if (id) whereCondition.id = id;
+        else if (maDonDangKy) {
+            whereCondition[Op.or] = [{ maDonDangKy }, { maDonDangKyGoc: maDonDangKy }];
+        } else if (maDonDangKyGoc) {
+            whereCondition.maDonDangKyGoc = maDonDangKyGoc;
+        } else {
+            return res.status(400).json({ message: "Thiếu ID hoặc mã đơn đăng ký của hồ sơ tách đơn KH!" });
+        }
+
+        const record = await DonTachNH_KH.findOne({
+            where: whereCondition,
+            include: [
+                {
+                    model: DonDangKyNhanHieu_KH,
+                    as: "don_KH",
+                    required: false,
+                    include: [
+                        { model: NhanHieu, as: "nhanHieu", required: false },
+                        { model: KhachHangCuoi, as: "khachHang", required: false },
+                        { model: DoiTac, as: "doitac", required: false },
+                        { model: DonDK_SPDV_KH, as: "DonDK_SPDV_KH", required: false },
+                    ],
+                },
+                {
+                    model: DonDangKyNhanHieu_KH,
+                    as: "donGoc_KH",
+                    required: false,
+                    include: [
+                        { model: NhanHieu, as: "nhanHieu", required: false },
+                        { model: KhachHangCuoi, as: "khachHang", required: false },
+                        { model: DoiTac, as: "doitac", required: false },
+                        { model: DonDK_SPDV_KH, as: "DonDK_SPDV_KH", required: false },
+                    ],
+                },
+            ],
+            order: [["id", "DESC"]],
+        });
+
+        if (!record) {
+            return res.status(404).json({ message: "Không tìm thấy hồ sơ tách đơn KH!" });
+        }
+
+        const plain = record.toJSON();
+        return res.status(200).json({
+            ...plain,
+            donMoi: plain.don_KH || null,
+            donGoc: plain.donGoc_KH || null,
+            soDonGoc: plain.donGoc_KH?.soDon || null,
+            ngayNopDonGoc: plain.donGoc_KH?.ngayNopDon || null,
+        });
+    } catch (error) {
+        console.error("❌ Lỗi lấy chi tiết đơn tách KH:", error);
         return res.status(500).json({ message: error.message });
     }
 };

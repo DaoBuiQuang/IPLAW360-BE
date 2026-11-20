@@ -4,6 +4,7 @@ import { authenticateUser, authorizeRoles } from "../middleware/authMiddleware.j
 import {
     getAllApplicationTD_KH,
     getAllApplicationTD_VN,
+    getApplicationTD_KHDetail,
     getApplicationTD_VNDetail,
     tachDonDangKy_KH,
     tachDonDangKy_VN,
@@ -44,6 +45,13 @@ router.post(
     authenticateUser,
     authorizeRoles("admin", "staff", "trainee"),
     getApplicationTD_VNDetail
+);
+
+router.post(
+    "/application_td_nh_kh/detail",
+    authenticateUser,
+    authorizeRoles("admin", "staff", "trainee"),
+    getApplicationTD_KHDetail
 );
 
 export default router;

@@ -11,6 +11,10 @@ export const DonCQSH_VN = sequelize.define("DonCQSH_VN", {
         autoIncrement: true,
         primaryKey: true,
     },
+    maHoSo: {
+        type: DataTypes.STRING,
+        allowNull: true,
+    },
     maDonDangKy: {
         type: DataTypes.STRING,
         allowNull: true,
@@ -92,7 +96,40 @@ export const DonCQSH_VN = sequelize.define("DonCQSH_VN", {
     duLieuThayDoi: {
         type: DataTypes.JSON,
         allowNull: true,
-    }
+    },
+    loaiThayDoi: {
+        type: DataTypes.STRING(50),
+        allowNull: false,
+        defaultValue: "CHUYEN_NHUONG",
+        comment: "CHUYEN_NHUONG | THUA_KE_KE_THUA",
+    },
+    giayUyQuyenGoc: {
+        type: DataTypes.BOOLEAN,
+        allowNull: true,
+        comment: "GUQ bản gốc (1) / bản sao (0)",
+    },
+    maUyQuyen: {
+        type: DataTypes.STRING,
+        allowNull: true,
+        comment: "Số đơn chứa GUQ gốc nếu dùng bản sao",
+    },
+    idGUQ: {
+        type: DataTypes.INTEGER,
+        allowNull: true,
+        references: { model: "GiayUyQuyen", key: "id" },
+        onDelete: "SET NULL",
+    },
+    hanTraLoi: {
+        type: DataTypes.DATEONLY,
+        allowNull: true,
+        comment: "Hạn trả lời Cục hiện hành của vòng thông báo mới nhất chưa trả lời",
+    },
+    tuDongTuChoi: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        comment: "1 = hệ thống tự chuyển Từ chối do quá hạn trả lời",
+    },
 }, {
     timestamps: true,
     tableName: "DonCQSH_VN",

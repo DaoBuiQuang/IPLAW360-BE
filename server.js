@@ -42,6 +42,12 @@ import donCQSH_NhanHieu_VNRouter from "./src/routers/donCQSH_NhanHieu_VNRouter.j
 // import nganhNgheRouter from "./src/routers/nganhNgheRouter.js"
 import { connectDB } from "./src/config/db.js";
 import { syncDatabase } from "./src/models/index.js";
+import cron from "node-cron";
+import { autoRejectExpiredDonSuaDoi } from "./src/controllers/NH_VN_SD/donSuaDoi_NH_VNController.js";
+import { autoRejectExpiredDonSuaDoi_KH } from "./src/controllers/KH/donSuaDoi_NH_KHController.js";
+import { autoRejectExpiredDonCQSH_VN } from "./src/controllers/NH_CQSH/donCQSH_NHController.js";
+import { autoRejectExpiredDonCQSH_KH } from "./src/controllers/KH/donCQSH_NH_KHController.js";
+import donCQSH_NhanHieu_KHRouter from "./src/routers/donCQSH_NhanHieu_KHRouter.js";
 import { swaggerUi, swaggerSpec } from "./src/config/swagger.js";
 
 import cors from "cors";
@@ -111,8 +117,28 @@ app.use("/api", timeSheetRouter);
 app.use("/api", dsCongViecRouter);
 app.use("/api", nhomNhanSuRouter);
 app.use("/api", donCQSH_NhanHieu_VNRouter);
+app.use("/api", donCQSH_NhanHieu_KHRouter);
 connectDB();
 syncDatabase();
+
+// Cron hằng ngày (00:05 giờ VN): tự động Từ chối Đơn sửa đổi & Chuyển quyền NH (VN & KH) quá hạn trả lời Cục SHTT
+cron.schedule(
+  "5 0 * * *",
+  () => {
+    autoRejectExpiredDonSuaDoi({ force: true });
+    autoRejectExpiredDonSuaDoi_KH({ force: true });
+    autoRejectExpiredDonCQSH_VN({ force: true });
+    autoRejectExpiredDonCQSH_KH({ force: true });
+  },
+  { timezone: "Asia/Ho_Chi_Minh" }
+);
+// Quét 1 lần sau khi khởi động
+setTimeout(() => {
+  autoRejectExpiredDonSuaDoi({ force: true });
+  autoRejectExpiredDonSuaDoi_KH({ force: true });
+  autoRejectExpiredDonCQSH_VN({ force: true });
+  autoRejectExpiredDonCQSH_KH({ force: true });
+}, 15 * 1000);
 const PORT = process.env.PORT || 3000;
 // app.listen(PORT, () => {
 //   console.log(`🚀 Server running on http://localhost:${PORT}`);

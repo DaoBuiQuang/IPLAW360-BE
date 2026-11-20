@@ -2,12 +2,48 @@ import { Auth } from "../models/authModel.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { NhanSu } from "../models/nhanSuModel.js";
+import { Op, fn, col, where } from "sequelize";
 // Tạm tắt thao tác FCM token cùng notification Firebase.
 // import { FCMToken } from "../models/fcmTokenModel.js";
 import dotenv from "dotenv";
 import { ACCOUNT_ROLES } from "../utils/accountRoles.js";
 
 dotenv.config();
+
+/**
+ * Tìm tài khoản Auth theo Username (chính xác) hoặc NhanSu.email (không phân biệt hoa thường).
+ * Tách 2 bước truy vấn theo index Username và NhanSu.email để tránh full table scan / ambiguous join.
+ */
+const findAuthByUsernameOrEmail = async (rawIdentifier) => {
+    const loginKey = String(rawIdentifier || "").trim();
+    if (!loginKey) return null;
+
+    // Bước 1: Tìm chính xác theo Auth.Username
+    let user = await Auth.findOne({
+        where: { Username: loginKey },
+        include: [{ model: NhanSu, as: "nhanSu" }],
+    });
+    if (user) return user;
+
+    // Bước 2: Tìm theo NhanSu.email không phân biệt hoa thường
+    const nhanSu = await NhanSu.findOne({
+        where: {
+            [Op.and]: [
+                { email: { [Op.ne]: null } },
+                { email: { [Op.ne]: "" } },
+                where(fn("LOWER", col("email")), loginKey.toLowerCase()),
+            ],
+        },
+        attributes: ["maNhanSu"],
+    });
+    if (!nhanSu) return null;
+
+    user = await Auth.findOne({
+        where: { maNhanSu: nhanSu.maNhanSu },
+        include: [{ model: NhanSu, as: "nhanSu" }],
+    });
+    return user;
+};
 export const register = async (req, res) => {
     try {
         const { maNhanSu, username, password, role } = req.body;
@@ -43,36 +79,48 @@ export const register = async (req, res) => {
 
 export const login = async (req, res) => {
     try {
-        const { username, password } = req.body;
+        const { username, identifier, email, password } = req.body || {};
+        const loginKey = String(username || identifier || email || "").trim();
 
-        if (!username || !password) {
-            return res.status(400).json({ message: "Tên đăng nhập và mật khẩu là bắt buộc" });
+        if (!loginKey || !password) {
+            return res.status(400).json({ message: "Tên đăng nhập (hoặc email) và mật khẩu là bắt buộc" });
         }
-        const user = await Auth.findOne({
-            where: { Username: username },
-            include: [
-                {
-                    model: NhanSu,
-                    as: 'nhanSu', 
-                },
-            ],
-        });        
+
+        const user = await findAuthByUsernameOrEmail(loginKey);
         if (!user) {
             return res.status(401).json({ message: "Tên đăng nhập hoặc mật khẩu không đúng" });
         }
+
         const isMatch = await bcrypt.compare(password, user.PasswordHash);
         if (!isMatch) {
             return res.status(401).json({ message: "Tên đăng nhập hoặc mật khẩu không đúng" });
         }
-        const ten = user.nhanSu?.hoTen;
+
+        const ten = user.nhanSu?.hoTen || null;
+        const userEmail = user.nhanSu?.email || null;
         const token = jwt.sign(
-            { id: user.AuthID, maNhanSu: user.maNhanSu, role: user.Role, tenNhanSu: ten },
-             process.env.JWT_SECRET,
+            {
+                id: user.AuthID,
+                maNhanSu: user.maNhanSu,
+                role: user.Role,
+                tenNhanSu: ten,
+                email: userEmail,
+                username: user.Username,
+            },
+            process.env.JWT_SECRET,
             { expiresIn: "7d" }
         );
         await user.update({ Token: token });
 
-        res.status(200).json({ message: "Đăng nhập thành công", token });
+        res.status(200).json({
+            message: "Đăng nhập thành công",
+            token,
+            maNhanSu: user.maNhanSu,
+            role: user.Role,
+            tenNhanSu: ten,
+            email: userEmail,
+            username: user.Username,
+        });
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -136,13 +184,14 @@ export const changePassword = async (req, res) => {
 };
 export const resetPassword = async (req, res) => {
   try {
-    const { username, newPassword } = req.body;
+    const { username, identifier, email, newPassword } = req.body || {};
+    const loginKey = String(username || identifier || email || "").trim();
 
-    if (!username || !newPassword) {
-      return res.status(400).json({ message: "Thiếu tên tài khoản hoặc mật khẩu mới." });
+    if (!loginKey || !newPassword) {
+      return res.status(400).json({ message: "Thiếu tên tài khoản (hoặc email) hoặc mật khẩu mới." });
     }
 
-    const user = await Auth.findOne({ where: { Username: username } });
+    const user = await findAuthByUsernameOrEmail(loginKey);
     if (!user) {
       return res.status(404).json({ message: "Tài khoản không tồn tại." });
     }

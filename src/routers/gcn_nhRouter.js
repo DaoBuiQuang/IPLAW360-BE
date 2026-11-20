@@ -224,14 +224,11 @@ router.post("/gcn_nh_kh/detail", authenticateUser, getGCN_NH_CAMDetail);
  *             type: object
  *             required:
  *               - soBang
- *               - trangThaiBang
+ *               - soDon
  *             properties:
  *               soBang:
  *                 type: string
  *                 example: "123456"
- *               trangThaiBang:
- *                 type: string
- *                 enum: ["1", "2", "4"]
  *               soDon:
  *                 type: string
  *                 example: "4-2024-123456"
@@ -263,14 +260,11 @@ router.post("/gcn_nh_vn/add", authenticateUser, addGCN_NH_VN);
  *             type: object
  *             required:
  *               - soBang
- *               - trangThaiBang
+ *               - soDon
  *             properties:
  *               soBang:
  *                 type: string
  *                 example: "KH-123456"
- *               trangThaiBang:
- *                 type: string
- *                 enum: ["1", "2", "3", "4", "5", "6", "7"]
  *               soDon:
  *                 type: string
  *                 example: "KH-2024-123456"
@@ -302,8 +296,6 @@ router.post("/gcn_nh_cam/add", authenticateUser, addGCN_NH_Cam);
  *             type: object
  *             required:
  *               - id
- *               - soBang
- *               - trangThaiBang
  *             properties:
  *               id:
  *                 type: integer
@@ -311,15 +303,9 @@ router.post("/gcn_nh_cam/add", authenticateUser, addGCN_NH_Cam);
  *               soBang:
  *                 type: string
  *                 example: "123456"
- *               trangThaiBang:
- *                 type: string
- *                 enum: ["1", "2", "4", "Đã chuyển quyền"]
- *                 description: Giá trị Đã chuyển quyền áp dụng khi văn bằng đã có trạng thái này.
  *     responses:
  *       200:
  *         description: Cập nhật thành công
- *       400:
- *         description: Dữ liệu không hợp lệ
  *       404:
  *         description: Không tìm thấy GCN
  */
@@ -341,8 +327,6 @@ router.put("/gcn_nh_vn/edit", authenticateUser, editGCN_NH_VN);
  *             type: object
  *             required:
  *               - id
- *               - soBang
- *               - trangThaiBang
  *             properties:
  *               id:
  *                 type: integer
@@ -350,14 +334,9 @@ router.put("/gcn_nh_vn/edit", authenticateUser, editGCN_NH_VN);
  *               soBang:
  *                 type: string
  *                 example: "KH-123456"
- *               trangThaiBang:
- *                 type: string
- *                 enum: ["1", "2", "3", "4", "5", "6", "7"]
  *     responses:
  *       200:
  *         description: Cập nhật thành công
- *       400:
- *         description: Dữ liệu không hợp lệ
  *       404:
  *         description: Không tìm thấy GCN
  */

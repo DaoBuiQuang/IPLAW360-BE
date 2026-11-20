@@ -29,10 +29,6 @@ import {
     computeHanNopTuyenThe,
 } from "../utils/gcnDateHelper.js";
 
-const vietnamCertificateStatuses = ["1", "2", "4"];
-const cambodiaCertificateStatuses = ["1", "2", "3", "4", "5", "6", "7"];
-const transferredCertificateStatus = "Đã chuyển quyền";
-
 // Helper for token-based case-insensitive multi-word search
 const buildTokensSearchCondition = (value, fieldName) => {
     if (!value) return undefined;
@@ -776,7 +772,6 @@ export const getGCN_NHDetail = async (req, res) => {
                 "hanGiaHan",
                 "idKhachHang",
                 "idDoiTac",
-                "idGUQ",
                 "maQuocGia",
                 "quyetDinhSo",
                 "maNhanHieu",
@@ -791,16 +786,19 @@ export const getGCN_NHDetail = async (req, res) => {
                 {
                     model: NhanHieu,
                     as: "NhanHieu",
+                    required: false,
                     attributes: ["tenNhanHieu", "linkAnh"],
                 },
                 {
                     model: KhachHangCuoi,
                     as: "KhachHangCuoi",
+                    required: false,
                     attributes: ["tenKhachHang", "diaChi"],
                 },
                 {
                     model: DoiTac,
                     as: "DoiTac",
+                    required: false,
                     attributes: ["tenDoiTac"],
                 },
             ],
@@ -941,7 +939,6 @@ export const getGCN_NHDetail = async (req, res) => {
             hanGiaHan: resolveHanGiaHanForRead(gcn_nh.hanGiaHan, gcn_nh.ngayNopDon),
             idKhachHang: gcn_nh.idKhachHang,
             idDoiTac: gcn_nh.idDoiTac,
-            idGUQ: gcn_nh.idGUQ,
             maNhanHieu: gcn_nh.maNhanHieu,
             maQuocGia: gcn_nh.maQuocGia,
             quyetDinhSo: gcn_nh.quyetDinhSo,
@@ -1002,7 +999,6 @@ export const getGCN_NH_CAMDetail = async (req, res) => {
                 "ngayGhiNhanTuyenThe",
                 "idKhachHang",
                 "idDoiTac",
-                "idGUQ",
                 "maQuocGia",
                 "quyetDinhSo",
                 "maNhanHieu",
@@ -1016,16 +1012,19 @@ export const getGCN_NH_CAMDetail = async (req, res) => {
                 {
                     model: NhanHieu,
                     as: "NhanHieu",
+                    required: false,
                     attributes: ["tenNhanHieu", "linkAnh"],
                 },
                 {
                     model: KhachHangCuoi,
                     as: "KhachHangCuoi",
+                    required: false,
                     attributes: ["tenKhachHang", "diaChi"],
                 },
                 {
                     model: DoiTac,
                     as: "DoiTac",
+                    required: false,
                     attributes: ["tenDoiTac"],
                 },
             ],
@@ -1121,7 +1120,6 @@ export const getGCN_NH_CAMDetail = async (req, res) => {
             trangThaiBang: gcn_nh.trangThaiBang || null,
             idKhachHang: gcn_nh.idKhachHang,
             idDoiTac: gcn_nh.idDoiTac,
-            idGUQ: gcn_nh.idGUQ,
             maNhanHieu: gcn_nh.maNhanHieu,
             maQuocGia: gcn_nh.maQuocGia,
             quyetDinhSo: gcn_nh.quyetDinhSo,
@@ -1138,15 +1136,10 @@ export const getGCN_NH_CAMDetail = async (req, res) => {
 
 
 export const addGCN_NH_VN = async (req, res) => {
-    const soBang = String(req.body.soBang ?? "").trim();
-    const trangThaiBang = String(req.body.trangThaiBang ?? "").trim();
-    if (!soBang || !vietnamCertificateStatuses.includes(trangThaiBang)) {
-        return res.status(400).json({ message: "Cần nhập số bằng và chọn trạng thái bằng hợp lệ." });
-    }
-
-    const transaction = await GCN_NH.sequelize.transaction();
+    const transaction = await GCN_NH.sequelize.transaction(); // ✅ Khởi tạo transaction đúng cách
     try {
         const {
+            soBang,
             soDon,
             idKhachHang,
             idDoiTac,
@@ -1163,34 +1156,67 @@ export const addGCN_NH_VN = async (req, res) => {
             hanGiaHan,
             hanGiaHanBang,
             hanNopTuyenThe,
+            trangThaiBang,
+            quyetDinhSo,
+            clientsRef,
+            clientRef,
+            anhBang,
             anhBangBase64, // Ảnh từ FE
             vuViecs,
             maNhanSuCapNhap,
             idGUQ
         } = req.body;
 
-        // ✅ Kiểm tra trùng số bằng
-        const existed = await GCN_NH.findOne({ where: { soBang }, transaction });
-        if (existed) {
+        // ✅ Kiểm tra đầu vào bắt buộc (chỉ bắt buộc số bằng; không bắt buộc maNhanHieu / idKhachHang)
+        const cleanSoBang = soBang !== undefined && soBang !== null ? String(soBang).trim() : "";
+        if (!cleanSoBang) {
             await transaction.rollback();
             return res.status(400).json({
-                message: `Số bằng "${soBang}" đã tồn tại trong hệ thống!`,
+                message: "Thiếu thông tin bắt buộc: số bằng!",
             });
         }
 
-        // ✅ Kiểm tra hoặc tạo mới nhãn hiệu
-        let nhanHieu = null;
-        if (String(maNhanHieu ?? "").trim()) {
-            nhanHieu = await NhanHieu.findOne({ where: { maNhanHieu }, transaction });
+        // ✅ Kiểm tra trùng số bằng
+        const existed = await GCN_NH.findOne({ where: { soBang: cleanSoBang }, transaction });
+        if (existed) {
+            await transaction.rollback();
+            return res.status(400).json({
+                message: `Số bằng "${cleanSoBang}" đã tồn tại trong hệ thống!`,
+            });
+        }
+
+        // ✅ Kiểm tra hoặc tạo mới nhãn hiệu (chỉ khi có maNhanHieu, tương tự addGCN_NH_Cam)
+        let resolvedMaNhanHieu = null;
+        if (maNhanHieu !== undefined && maNhanHieu !== null && String(maNhanHieu).trim() !== "") {
+            let nhanHieu = await NhanHieu.findOne({ where: { maNhanHieu }, transaction });
             if (!nhanHieu) {
                 nhanHieu = await NhanHieu.create(
-                    { maNhanHieu, tenNhanHieu: tenNhanHieu || null },
+                    {
+                        maNhanHieu,
+                        tenNhanHieu: tenNhanHieu || null,
+                    },
                     { transaction }
                 );
             }
+            resolvedMaNhanHieu = nhanHieu.maNhanHieu;
         }
-        if (idGUQ) {
-            const guq = await GiayUyQuyen.findByPk(idGUQ, { transaction });
+
+        const cleanIdKhachHang =
+            idKhachHang !== undefined && idKhachHang !== null && String(idKhachHang).trim() !== ""
+                ? Number(idKhachHang)
+                : null;
+        const cleanIdDoiTac =
+            idDoiTac !== undefined && idDoiTac !== null && String(idDoiTac).trim() !== ""
+                ? Number(idDoiTac)
+                : null;
+        const cleanIdGUQ =
+            idGUQ !== undefined && idGUQ !== null && String(idGUQ).trim() !== ""
+                ? Number(idGUQ)
+                : null;
+        const cleanMaHoSo = maHoSo && String(maHoSo).trim() !== "" ? String(maHoSo).trim() : null;
+
+        if (cleanIdGUQ) {
+            const guq = await GiayUyQuyen.findByPk(cleanIdGUQ, { transaction });
 
             if (guq) {
                 const isEmptySoDonGoc =
@@ -1215,31 +1241,33 @@ export const addGCN_NH_VN = async (req, res) => {
 
         const newGCN = await GCN_NH.create(
             {
-                soBang,
-                trangThaiBang,
-                soDon,
-                maHoSo,
-                ghiChu,
-                dsNhomSPDV,
+                soBang: cleanSoBang,
+                soDon: soDon || null,
+                maHoSo: cleanMaHoSo,
+                ghiChu: ghiChu || null,
+                dsNhomSPDV: dsNhomSPDV || null,
                 ngayNopDon: ngayNopDon || null,
                 ngayCapBang: ngayCapBang || null,
                 ngayHetHanBang: resolvedDates.ngayHetHanBang,
-                chiTietNhomSPDV,
+                chiTietNhomSPDV: chiTietNhomSPDV || null,
                 hanGiaHan: resolvedDates.hanGiaHan,
-                hanNopTuyenThe: hanNopTuyenThe || null,
+                trangThaiBang: trangThaiBang || null,
+                quyetDinhSo: quyetDinhSo || null,
+                clientsRef: clientsRef ?? clientRef ?? null,
                 maQuocGia: "VN", // quốc gia cố định
-                idKhachHang: idKhachHang || null,
-                idDoiTac: idDoiTac || null,
-                maNhanHieu: nhanHieu?.maNhanHieu ?? null,
-                anhBangBase64: anhBangBase64 || null,
+                idKhachHang: cleanIdKhachHang,
+                idDoiTac: cleanIdDoiTac,
+                maNhanHieu: resolvedMaNhanHieu,
+                anhBang: anhBang ?? anhBangBase64 ?? null,
                 mauSacNH: mauSacNH || null,
-                idGUQ: idGUQ || null,
+                idGUQ: cleanIdGUQ,
+                maNhanSuCapNhap: req.user?.maNhanSu || maNhanSuCapNhap || null,
             },
             { transaction }
         );
 
-        // ✅ Tạo các vụ việc nếu có
-        if (Array.isArray(vuViecs) && vuViecs.length > 0) {
+        // ✅ Tạo các vụ việc nếu có (và có đủ maHoSo & idKhachHang)
+        if (Array.isArray(vuViecs) && vuViecs.length > 0 && cleanMaHoSo && cleanIdKhachHang) {
             for (const vuViec of vuViecs) {
                 let ngayXuatBill = null;
                 let maNguoiXuatBill = null;
@@ -1253,10 +1281,10 @@ export const addGCN_NH_VN = async (req, res) => {
                         tenVuViec: vuViec.tenVuViec,
                         moTa: vuViec.moTa,
                         trangThai: vuViec.trangThai,
-                        maHoSo,
+                        maHoSo: cleanMaHoSo,
                         maDon: newGCN.id,
-                        soDon: soDon,
-                        idKhachHang: idKhachHang,
+                        soDon: soDon || null,
+                        idKhachHang: cleanIdKhachHang,
                         maQuocGiaVuViec: "VN",
                         ngayTaoVV: new Date(),
                         maNguoiXuLy: vuViec.maNguoiXuLy,
@@ -1295,15 +1323,10 @@ export const addGCN_NH_VN = async (req, res) => {
 
 
 export const addGCN_NH_Cam = async (req, res) => {
-    const soBang = String(req.body.soBang ?? "").trim();
-    const trangThaiBang = String(req.body.trangThaiBang ?? "").trim();
-    if (!soBang || !cambodiaCertificateStatuses.includes(trangThaiBang)) {
-        return res.status(400).json({ message: "Cần nhập số bằng và chọn trạng thái bằng hợp lệ." });
-    }
-
     const transaction = await GCN_NH_KH.sequelize.transaction();
     try {
         const {
+            soBang,
             soDon,
             idKhachHang,
             idDoiTac,
@@ -1323,6 +1346,7 @@ export const addGCN_NH_Cam = async (req, res) => {
             ngayNopYCTuyenThe,
             loaiTuyenThe,
             ngayGhiNhanTuyenThe,
+            trangThaiBang,
             quyetDinhSo,
             clientsRef,
             clientRef,
@@ -1332,6 +1356,14 @@ export const addGCN_NH_Cam = async (req, res) => {
             maNhanSuCapNhap,
             idGUQ
         } = req.body;
+
+        // ✅ 1. Kiểm tra dữ liệu đầu vào (chỉ bắt buộc số bằng)
+        if (!soBang || String(soBang).trim() === "") {
+            await transaction.rollback();
+            return res.status(400).json({
+                message: "Thiếu thông tin bắt buộc: số bằng!",
+            });
+        }
 
         // ✅ 2. Kiểm tra trùng số bằng
         const existed = await GCN_NH_KH.findOne({ where: { soBang }, transaction });
@@ -1372,7 +1404,7 @@ export const addGCN_NH_Cam = async (req, res) => {
 
         const newGCN = await GCN_NH_KH.create(
             {
-                soBang,
+                soBang: String(soBang).trim(),
                 soDon: soDon || null,
                 maHoSo: maHoSo || null,
                 ghiChu: ghiChu || null,
@@ -1386,7 +1418,7 @@ export const addGCN_NH_Cam = async (req, res) => {
                 ngayNopYCTuyenThe: ngayNopYCTuyenThe || null,
                 loaiTuyenThe: loaiTuyenThe || null,
                 ngayGhiNhanTuyenThe: ngayGhiNhanTuyenThe || null,
-                trangThaiBang,
+                trangThaiBang: trangThaiBang || null,
                 quyetDinhSo: quyetDinhSo || null,
                 clientsRef: clientsRef ?? clientRef ?? null,
                 maQuocGia: "KH", // ✅ Cố định cho Campuchia
@@ -1474,19 +1506,11 @@ export const addGCN_NH_Cam = async (req, res) => {
 
 
 export const editGCN_NH_CAM = async (req, res) => {
-    const { id } = req.body;
-    const soBang = String(req.body.soBang ?? "").trim();
-    const trangThaiBang = String(req.body.trangThaiBang ?? "").trim();
-    if (!id) {
-        return res.status(400).json({ message: "Thiếu ID văn bằng cần chỉnh sửa" });
-    }
-    if (!soBang || !cambodiaCertificateStatuses.includes(trangThaiBang)) {
-        return res.status(400).json({ message: "Cần nhập số bằng và chọn trạng thái bằng hợp lệ." });
-    }
-
     const t = await GCN_NH_KH.sequelize.transaction();
     try {
         const {
+            id,
+            soBang,
             soDon,
             maHoSo,
             ngayNopDon,
@@ -1504,6 +1528,7 @@ export const editGCN_NH_CAM = async (req, res) => {
             ngayNopYCTuyenThe,
             loaiTuyenThe,
             ngayGhiNhanTuyenThe,
+            trangThaiBang,
             idKhachHang,
             idDoiTac,
             maNhanHieu,
@@ -1514,6 +1539,11 @@ export const editGCN_NH_CAM = async (req, res) => {
             maNhanSuCapNhap,
             idGUQ
         } = req.body;
+
+        if (!id) {
+            await t.rollback();
+            return res.status(400).json({ message: "Thiếu ID văn bằng cần chỉnh sửa" });
+        }
 
         const record = await GCN_NH_KH.findByPk(id, { transaction: t });
         if (!record) {
@@ -1559,7 +1589,7 @@ export const editGCN_NH_CAM = async (req, res) => {
 
         await record.update(
             {
-                soBang,
+                soBang: soBang !== undefined ? soBang : record.soBang,
                 soDon: soDon !== undefined ? (soDon || null) : record.soDon,
                 maHoSo: maHoSo !== undefined ? (maHoSo || null) : record.maHoSo,
                 ngayNopDon: ngayNopDon !== undefined ? (ngayNopDon || null) : record.ngayNopDon,
@@ -1574,7 +1604,7 @@ export const editGCN_NH_CAM = async (req, res) => {
                 ngayNopYCTuyenThe: ngayNopYCTuyenThe !== undefined ? (ngayNopYCTuyenThe || null) : record.ngayNopYCTuyenThe,
                 loaiTuyenThe: loaiTuyenThe !== undefined ? (loaiTuyenThe || null) : record.loaiTuyenThe,
                 ngayGhiNhanTuyenThe: effectiveNgayGhiNhanTuyenThe,
-                trangThaiBang,
+                trangThaiBang: trangThaiBang !== undefined ? (trangThaiBang || null) : record.trangThaiBang,
                 idKhachHang: normalizeOptionalInt(idKhachHang, record.idKhachHang),
                 idDoiTac: normalizeOptionalInt(idDoiTac, record.idDoiTac),
                 maNhanHieu: normalizeOptionalInt(maNhanHieu, record.maNhanHieu),
@@ -1695,7 +1725,6 @@ export const editGCN_NH_CAM = async (req, res) => {
             attributes: [
                 "id",
                 "soBang",
-                "trangThaiBang",
                 "soDon",
                 "maHoSo",
                 "ngayNopDon",
@@ -1718,9 +1747,9 @@ export const editGCN_NH_CAM = async (req, res) => {
                 "ngayHetHanBang",
             ],
             include: [
-                { model: NhanHieu, as: "NhanHieu", attributes: ["tenNhanHieu", "linkAnh"] },
-                { model: KhachHangCuoi, as: "KhachHangCuoi", attributes: ["tenKhachHang", "diaChi"] },
-                { model: DoiTac, as: "DoiTac", attributes: ["tenDoiTac"] },
+                { model: NhanHieu, as: "NhanHieu", required: false, attributes: ["tenNhanHieu", "linkAnh"] },
+                { model: KhachHangCuoi, as: "KhachHangCuoi", required: false, attributes: ["tenKhachHang", "diaChi"] },
+                { model: DoiTac, as: "DoiTac", required: false, attributes: ["tenDoiTac"] },
             ],
         });
 
@@ -1738,19 +1767,11 @@ export const editGCN_NH_CAM = async (req, res) => {
 
 
 export const editGCN_NH_VN = async (req, res) => {
-    const { id } = req.body;
-    const soBang = String(req.body.soBang ?? "").trim();
-    const trangThaiBang = String(req.body.trangThaiBang ?? "").trim();
-    if (!id) {
-        return res.status(400).json({ message: "Thiếu ID văn bằng cần chỉnh sửa" });
-    }
-    if (!soBang || !(vietnamCertificateStatuses.includes(trangThaiBang) || trangThaiBang === transferredCertificateStatus)) {
-        return res.status(400).json({ message: "Cần nhập số bằng và chọn trạng thái bằng hợp lệ." });
-    }
-
     const t = await GCN_NH.sequelize.transaction();
     try {
         const {
+            id,
+            soBang,
             soDon,
             maHoSo,
             ngayNopDon,
@@ -1767,10 +1788,16 @@ export const editGCN_NH_VN = async (req, res) => {
             maQuocGia,
             quyetDinhSo,
             ngayHetHanBang,
+            trangThaiBang,
             vuViecs,
             idGUQ,
             maNhanSuCapNhap, // nếu có truyền từ frontend
         } = req.body;
+
+        if (!id) {
+            await t.rollback();
+            return res.status(400).json({ message: "Thiếu ID văn bằng cần chỉnh sửa" });
+        }
 
         // ✅ Tìm bản ghi chính
         const record = await GCN_NH.findByPk(id, { transaction: t });
@@ -1788,23 +1815,36 @@ export const editGCN_NH_VN = async (req, res) => {
         }
 
         // ✅ Cập nhật thông tin văn bằng
-        if (trangThaiBang === transferredCertificateStatus && record.trangThaiBang !== transferredCertificateStatus) {
-            await t.rollback();
-            return res.status(400).json({ message: "Trạng thái Đã chuyển quyền được đặt khi chuyển quyền sở hữu." });
-        }
-
         const resolvedDatesVNEdit = resolveGCNDatesForSave({
             ngayNopDon: ngayNopDon !== undefined ? ngayNopDon : record.ngayNopDon,
             ngayHetHanBang: ngayHetHanBang !== undefined ? ngayHetHanBang : record.ngayHetHanBang,
             hanGiaHan: hanGiaHan !== undefined ? hanGiaHan : record.hanGiaHan,
         });
 
+        const cleanIdKhachHang =
+            idKhachHang === undefined
+                ? undefined
+                : idKhachHang !== null && String(idKhachHang).trim() !== ""
+                ? Number(idKhachHang)
+                : null;
+        const cleanMaNhanHieu =
+            maNhanHieu === undefined
+                ? undefined
+                : maNhanHieu !== null && String(maNhanHieu).trim() !== ""
+                ? Number(maNhanHieu)
+                : null;
+        const cleanMaHoSo =
+            maHoSo === undefined
+                ? undefined
+                : maHoSo && String(maHoSo).trim() !== ""
+                ? String(maHoSo).trim()
+                : null;
+
         await record.update(
             {
                 soBang,
-                trangThaiBang,
                 soDon,
-                maHoSo,
+                maHoSo: cleanMaHoSo,
                 ngayNopDon,
                 ngayCapBang,
                 ghiChu,
@@ -1813,11 +1853,12 @@ export const editGCN_NH_VN = async (req, res) => {
                 mauSacNH,
                 anhBang: linkAnh,
                 hanGiaHan: resolvedDatesVNEdit.hanGiaHan,
-                idKhachHang,
+                idKhachHang: cleanIdKhachHang,
                 idDoiTac,
-                maNhanHieu,
+                maNhanHieu: cleanMaNhanHieu,
                 maQuocGia,
                 quyetDinhSo,
+                trangThaiBang,
                 ngayHetHanBang: resolvedDatesVNEdit.ngayHetHanBang,
                 idGUQ,
             },
@@ -1825,9 +1866,10 @@ export const editGCN_NH_VN = async (req, res) => {
         );
 
         // ==================== Đồng bộ danh sách Vụ Việc ====================
-        if (Array.isArray(vuViecs)) {
+        const effectiveMaHoSo = record.maHoSo;
+        if (Array.isArray(vuViecs) && effectiveMaHoSo) {
             const vuViecsHienTai = await VuViec.findAll({
-                where: { maHoSo },
+                where: { maHoSo: effectiveMaHoSo },
                 transaction: t,
             });
 
@@ -1916,7 +1958,6 @@ export const editGCN_NH_VN = async (req, res) => {
             attributes: [
                 "id",
                 "soBang",
-                "trangThaiBang",
                 "soDon",
                 "maHoSo",
                 "ngayNopDon",
@@ -1935,14 +1976,14 @@ export const editGCN_NH_VN = async (req, res) => {
                 "ngayHetHanBang",
             ],
             include: [
-                { model: NhanHieu, as: "NhanHieu", attributes: ["tenNhanHieu", "linkAnh"] },
-                { model: KhachHangCuoi, as: "KhachHangCuoi", attributes: ["tenKhachHang", "diaChi"] },
-                { model: DoiTac, as: "DoiTac", attributes: ["tenDoiTac"] },
+                { model: NhanHieu, as: "NhanHieu", required: false, attributes: ["tenNhanHieu", "linkAnh"] },
+                { model: KhachHangCuoi, as: "KhachHangCuoi", required: false, attributes: ["tenKhachHang", "diaChi"] },
+                { model: DoiTac, as: "DoiTac", required: false, attributes: ["tenDoiTac"] },
             ],
         });
 
         return res.status(200).json({
-            message: "Cập nhật văn bằng thành công",
+            message: "Cập nhật văn bằng và vụ việc thành công",
             data: updatedRecord,
         });
     } catch (error) {

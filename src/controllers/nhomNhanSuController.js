@@ -121,7 +121,7 @@ export const listAllTeams = async (req, res) => {
             searchText,
             pageIndex = 1,
             pageSize = 20,
-        } = req.body;
+        } = req.body || {};
 
         const page = Math.max(Number(pageIndex), 1);
         const size = Math.min(Math.max(Number(pageSize), 1), 100);
@@ -129,24 +129,44 @@ export const listAllTeams = async (req, res) => {
         const where = {};
         if (managerCode) where.managerCode = managerCode;
 
+        const keyword = searchText && String(searchText).trim() !== "" ? String(searchText).trim() : null;
+        if (keyword) {
+            where[Op.or] = [
+                { "$manager.hoTen$": { [Op.like]: `%${keyword}%` } },
+                { "$manager.email$": { [Op.like]: `%${keyword}%` } },
+                { "$manager.maNhanSu$": { [Op.like]: `%${keyword}%` } },
+                { "$thanhVien.hoTen$": { [Op.like]: `%${keyword}%` } },
+                { "$thanhVien.email$": { [Op.like]: `%${keyword}%` } },
+                { "$thanhVien.maNhanSu$": { [Op.like]: `%${keyword}%` } },
+            ];
+        }
+
         const { count, rows } = await NhomNhanSu.findAndCountAll({
             where,
             include: [
                 {
                     model: NhanSu,
                     as: "manager",
-                    attributes: ["maNhanSu", "hoTen", "chucVu"],
-                    where: searchText
-                        ? { hoTen: { [Op.like]: `%${searchText}%` } }
-                        : undefined,
-                    required: !!searchText,
+                    attributes: ["maNhanSu", "hoTen", "chucVu", "email"],
+                    required: false,
                 },
                 {
                     model: NhanSu,
                     as: "thanhVien",
-                    attributes: ["maNhanSu", "hoTen", "chucVu", "email"],
+                    attributes: ["maNhanSu", "hoTen", "chucVu", "phongBan", "email", "sdt"],
+                    required: false,
+                    include: [
+                        {
+                            model: Auth,
+                            as: "Auth",
+                            attributes: ["Username", "Role"],
+                            required: false,
+                        },
+                    ],
                 },
             ],
+            subQuery: false,
+            distinct: true,
             limit: size,
             offset: (page - 1) * size,
             order: [["managerCode", "ASC"], ["createdAt", "ASC"]],
@@ -160,6 +180,7 @@ export const listAllTeams = async (req, res) => {
                 teamMap[mgCode] = {
                     managerCode: mgCode,
                     managerName: rec.manager?.hoTen || mgCode,
+                    managerEmail: rec.manager?.email || null,
                     managerChucVu: rec.manager?.chucVu || null,
                     tenNhom: rec.tenNhom || null,
                     members: [],
@@ -174,7 +195,11 @@ export const listAllTeams = async (req, res) => {
                     maNhanSu: rec.thanhVien.maNhanSu,
                     hoTen: rec.thanhVien.hoTen,
                     chucVu: rec.thanhVien.chucVu,
-                    email: rec.thanhVien.email,
+                    phongBan: rec.thanhVien.phongBan || null,
+                    email: rec.thanhVien.email || null,
+                    sdt: rec.thanhVien.sdt || null,
+                    username: rec.thanhVien.Auth?.Username || null,
+                    role: rec.thanhVien.Auth?.Role || "staff",
                 });
             }
         }

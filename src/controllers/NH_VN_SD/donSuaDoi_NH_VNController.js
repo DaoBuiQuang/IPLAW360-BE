@@ -8,8 +8,133 @@ import { TaiLieu } from "../../models/taiLieuModel.js";
 import { LichSuThamDinh } from "../../models/lichSuThamDinhModel.js";
 import { NhanHieu } from "../../models/nhanHieuModel.js";
 import { DoiTac } from "../../models/doiTacModel.js";
-import { Op, literal } from "sequelize";
-import { rollbackSpawnedChildDon } from "../../utils/lineageHelper.js";
+import { Op, literal, fn, col } from "sequelize";
+import { rollbackSpawnedChildDon, getDonLineageGraph, expandDonFamilyIds } from "../../utils/lineageHelper.js";
+import { LichSuPhanHoiSuaDoi_NH_VN } from "../../models/VN_SuaDoi_NH/lichSuPhanHoiSuaDoiNH_VNModel.js";
+import { GiayUyQuyen } from "../../models/GiayUyQuyenModel.js";
+import { QuocGia } from "../../models/quocGiaModel.js";
+import { SanPham_DichVu } from "../../models/sanPham_DichVuModel.js";
+import { NhanSu } from "../../models/nhanSuModel.js";
+
+/* =========================================================================
+ * HELPERS CHUNG: ngày VN, parse JSON, đồng bộ hanTraLoi, tự động từ chối quá hạn
+ * ========================================================================= */
+
+// Ngày hiện tại theo múi giờ VN (UTC+7) dạng YYYY-MM-DD
+export const todayVN = () => new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+const normalizeOptionalSoDon = (val) => {
+    if (val === undefined) return undefined;
+    if (val === null) return null;
+    const trimmed = String(val).trim();
+    return trimmed === "" ? null : trimmed;
+};
+
+const parseJsonObject = (raw) => {
+    if (!raw) return {};
+    if (typeof raw === "string") {
+        try {
+            const p = JSON.parse(raw);
+            return p && typeof p === "object" ? p : {};
+        } catch {
+            return {};
+        }
+    }
+    return typeof raw === "object" ? raw : {};
+};
+
+// Chuẩn hóa danh sách tài liệu sửa đổi: [{ tenTaiLieu, linkTaiLieu, trangThai }]
+const normalizeTaiLieuSuaDoi = (list) => {
+    if (!Array.isArray(list)) return undefined;
+    return list
+        .map((it) => {
+            if (typeof it === "string") return { tenTaiLieu: it, linkTaiLieu: null, trangThai: "Chưa nộp" };
+            if (!it || typeof it !== "object") return null;
+            const tenTaiLieu = it.tenTaiLieu ?? it.ten ?? it.name ?? null;
+            if (!tenTaiLieu) return null;
+            return {
+                tenTaiLieu,
+                linkTaiLieu: it.linkTaiLieu ?? it.link ?? null,
+                trangThai: it.trangThai ?? (it.linkTaiLieu || it.link ? "Đã nộp" : "Chưa nộp"),
+            };
+        })
+        .filter(Boolean);
+};
+
+/**
+ * Đồng bộ DonSuaDoi_NH_VN.hanTraLoi theo vòng phản hồi mới nhất chưa trả lời.
+ * - Đơn đang ở trạng thái 0 và có vòng chưa trả lời => hanTraLoi = hạn của vòng đó
+ * - Ngược lại (đã trả lời hết, hoặc trạng thái 1/2) => NULL
+ */
+export const syncActiveHanTraLoi = async (idDonSuaDoi, transaction = null) => {
+    const don = await DonSuaDoi_NH_VN.findByPk(idDonSuaDoi, {
+        attributes: ["id", "trangThaiDuyet"],
+        transaction,
+    });
+    if (!don) return null;
+
+    let nextHan = null;
+    if (Number(don.trangThaiDuyet) === 0) {
+        const latestUnanswered = await LichSuPhanHoiSuaDoi_NH_VN.findOne({
+            where: { idDonSuaDoi, ngayTraLoi: { [Op.is]: null } },
+            attributes: ["id", "lanThongBao", "hanTraLoi"],
+            order: [["lanThongBao", "DESC"], ["id", "DESC"]],
+            transaction,
+        });
+        nextHan = latestUnanswered?.hanTraLoi || null;
+    }
+    await DonSuaDoi_NH_VN.update({ hanTraLoi: nextHan }, { where: { id: idDonSuaDoi }, transaction });
+    return nextHan;
+};
+
+let lastAutoRejectAt = 0;
+const AUTO_REJECT_THROTTLE_MS = 60 * 1000;
+
+/**
+ * Tự động chuyển Từ chối các đơn sửa đổi đang chờ (0) đã quá hạn trả lời Cục.
+ * 1 câu UPDATE duy nhất, idempotent, tận dụng idx_sd_don_status_hantraloi.
+ * @param {{force?: boolean, id?: number}} opts  force: bỏ throttle; id: chỉ kiểm tra 1 tờ khai (luôn chạy)
+ * @returns {Promise<number>} số bản ghi bị chuyển trạng thái
+ */
+export const autoRejectExpiredDonSuaDoi = async ({ force = false, id = null } = {}) => {
+    const now = Date.now();
+    if (!id && !force && now - lastAutoRejectAt < AUTO_REJECT_THROTTLE_MS) return 0;
+    if (!id) lastAutoRejectAt = now;
+
+    try {
+        const tbl = DonSuaDoi_NH_VN.getTableName();
+        const tblName = typeof tbl === "string" ? tbl : tbl.tableName;
+        const [, meta] = await sequelize.query(
+            `UPDATE \`${tblName}\`
+             SET trangThaiDuyet = 2,
+                 tuDongTuChoi = 1,
+                 duocGhiNhanSuaDoi = 0,
+                 soDon = NULL,
+                 ngayChapThuan = NULL,
+                 ngayGhiNhanSuaDoi = NULL,
+                 ngayTuChoi = hanTraLoi,
+                 lyDoTuChoi = COALESCE(NULLIF(TRIM(lyDoTuChoi), ''),
+                     CONCAT('Tự động từ chối do quá hạn trả lời thông báo của Cục SHTT (Hạn: ', DATE_FORMAT(hanTraLoi, '%d/%m/%Y'), ')')),
+                 updatedAt = NOW()
+             WHERE trangThaiDuyet = 0
+               AND hanTraLoi IS NOT NULL
+               AND hanTraLoi < :today
+               ${id ? "AND id = :id" : ""}`,
+            { replacements: { today: todayVN(), id } }
+        );
+        return Number(meta?.affectedRows ?? meta?.rowCount ?? meta ?? 0) || 0;
+    } catch (err) {
+        console.error("❌ autoRejectExpiredDonSuaDoi:", err.message);
+        return 0;
+    }
+};
+
+// Tập maDonDangKy thuộc cùng phả hệ (sửa đổi / tách / chuyển quyền) của các mã đơn đầu vào
+const resolveFamily = async (seedMaDonList, transaction = null) => {
+    const graph = await getDonLineageGraph();
+    const family = expandDonFamilyIds(seedMaDonList.filter(Boolean), graph);
+    return { graph, family };
+};
 
 const generateMaDonDangKy = (maHoSo) => {
     const prefix = maHoSo || "SD";
@@ -84,6 +209,8 @@ export const approveDonSuaDoi_NH_VN = async (record, payload = {}, transaction =
                 duocGhiNhanSuaDoi: true,
                 ngayTuChoi: null,
                 lyDoTuChoi: null,
+                hanTraLoi: null,
+                tuDongTuChoi: false,
             },
             { transaction }
         );
@@ -191,7 +318,9 @@ export const approveDonSuaDoi_NH_VN = async (record, payload = {}, transaction =
         idKhachHang: idKhachHangMoi,
         maNhanHieu: maNhanHieuMoi,
         idDoiTac: payload.idDoiTac ?? duLieu.idDoiTac ?? donCuPlain.idDoiTac,
-        idGUQ: payload.idGUQ ?? duLieu.idGUQ ?? donCuPlain.idGUQ,
+        idGUQ: payload.idGUQ ?? record.idGUQ ?? duLieu.idGUQ ?? donCuPlain.idGUQ,
+        giayUyQuyenGoc: payload.giayUyQuyenGoc ?? record.giayUyQuyenGoc ?? duLieu.giayUyQuyenGoc ?? donCuPlain.giayUyQuyenGoc,
+        maUyQuyen: payload.maUyQuyen ?? record.maUyQuyen ?? duLieu.maUyQuyen ?? donCuPlain.maUyQuyen,
         daiDienSHTT:
             suaDoiDaiDien && ndSuaDoiDaiDien
                 ? ndSuaDoiDaiDien
@@ -250,6 +379,23 @@ export const approveDonSuaDoi_NH_VN = async (record, payload = {}, transaction =
         }
     }
 
+    // 6b. Bổ sung tài liệu sửa đổi (taiLieuSuaDoi) vào TaiLieu của đơn mới (không xóa tài liệu cũ)
+    const taiLieuSuaDoiList =
+        normalizeTaiLieuSuaDoi(payload.taiLieuSuaDoi ?? payload.taiLieuList) ??
+        normalizeTaiLieuSuaDoi(duLieu.taiLieuSuaDoi) ??
+        [];
+    for (const tl of taiLieuSuaDoiList) {
+        await TaiLieu.create(
+            {
+                maDonDangKy: maDonDangKyMoi,
+                tenTaiLieu: tl.tenTaiLieu,
+                linkTaiLieu: tl.linkTaiLieu,
+                trangThai: tl.trangThai,
+            },
+            { transaction }
+        );
+    }
+
     // 7. Copy Lịch sử thẩm định sang đơn mới
     const lichSuCuList = await LichSuThamDinh.findAll({
         where: { maDonDangKy: donCu.maDonDangKy },
@@ -278,6 +424,8 @@ export const approveDonSuaDoi_NH_VN = async (record, payload = {}, transaction =
             duocGhiNhanSuaDoi: true,
             ngayTuChoi: null,
             lyDoTuChoi: null,
+            hanTraLoi: null,
+            tuDongTuChoi: false,
             duLieuThayDoi: duLieu,
         },
         { transaction }
@@ -321,6 +469,12 @@ export const addApplicationSDNHVN = async (req, res) => {
             suaNhomSPDV,
             ndSuaNhomSPDV,
             suaDoiNoiDungKhac,
+            ndSuaDoiNoiDungKhac,
+            taiLieuList,
+            taiLieuSuaDoi,
+            giayUyQuyenGoc,
+            maUyQuyen,
+            idGUQ,
             trangThaiDuyet = 0,
             ngayChapThuan,
             ngayTuChoi,
@@ -337,11 +491,21 @@ export const addApplicationSDNHVN = async (req, res) => {
         } = req.body;
 
         const targetMaDonGoc = maDonDangKyCu || reqMaDonGoc || req.body.maDonDangKy;
-        const targetSoDon = soDonSD || soDon || null;
+        const rawIncomingSoDon = soDonSD !== undefined ? soDonSD : soDon;
+        const parsedTrangThaiDuyet = Number(trangThaiDuyet) || 0;
+        const targetSoDon = parsedTrangThaiDuyet === 2 ? null : (normalizeOptionalSoDon(rawIncomingSoDon) ?? null);
 
         if (!targetMaDonGoc) {
             await transaction.rollback();
             return res.status(400).json({ message: "Thiếu thông tin bắt buộc: mã đơn đăng ký gốc (maDonDangKyCu / maDonDangKyGoc)." });
+        }
+
+        const hasAnyAmendment = Boolean(
+            suaDoiDaiDien || suaDoiTenChuDon || suaDoiDiaChi || suaNhan || suaNhomSPDV || suaDoiNoiDungKhac
+        );
+        if (!hasAnyAmendment) {
+            await transaction.rollback();
+            return res.status(400).json({ message: "Vui lòng chọn ít nhất một mục cần sửa đổi!" });
         }
 
         const donCu = await DonDangKy.findOne({
@@ -371,17 +535,26 @@ export const addApplicationSDNHVN = async (req, res) => {
             });
         }
 
-        const countSD = await DonSuaDoi_NH_VN.count({
-            where: { maDonDangKyGoc: targetMaDonGoc },
+        // Sửa đổi nối tiếp: đếm toàn bộ tờ khai sửa đổi trong cùng phả hệ (không chỉ theo đơn gốc trực tiếp)
+        const { family: familyMaDon } = await resolveFamily([targetMaDonGoc]);
+        const maxLanInFamily = await DonSuaDoi_NH_VN.max("lanSuaDoi", {
+            where: { maDonDangKyGoc: { [Op.in]: familyMaDon } },
             transaction,
         });
-        const actualLanSuaDoi = lanSuaDoi ?? countSD + 1;
+        const countInFamily = await DonSuaDoi_NH_VN.count({
+            where: { maDonDangKyGoc: { [Op.in]: familyMaDon } },
+            transaction,
+        });
+        const computedLan = Math.max(Number(maxLanInFamily) || 0, countInFamily) + 1;
+        const actualLanSuaDoi = lanSuaDoi ?? computedLan;
         const actualMaHoSo = maHoSo || donCu.maHoSo || donCu.maHoSoVuViec;
+
+        const taiLieuSuaDoiNorm = normalizeTaiLieuSuaDoi(taiLieuSuaDoi ?? taiLieuList);
 
         const mergedDuLieuThayDoi = {
             ...(typeof duLieuThayDoi === "object" && duLieuThayDoi !== null ? duLieuThayDoi : {}),
             maHoSo: actualMaHoSo,
-            soDon: targetSoDon || donCu.soDon,
+            soDon: targetSoDon,
             idKhachHangMoi: idKhachHangMoi || idKhachHang || undefined,
             idDoiTac: idDoiTac ?? undefined,
             daiDienSHTT: daiDienSHTT ?? ndSuaDoiDaiDien ?? undefined,
@@ -399,20 +572,26 @@ export const addApplicationSDNHVN = async (req, res) => {
             suaNhomSPDV,
             ndSuaNhomSPDV,
             suaDoiNoiDungKhac,
+            ndSuaDoiNoiDungKhac,
+            taiLieuSuaDoi: taiLieuSuaDoiNorm,
+            giayUyQuyenGoc,
+            maUyQuyen,
+            idGUQ: idGUQ ?? undefined,
             moTa: moTaSuaDoi || moTa || null,
         };
 
-        const parsedTrangThaiDuyet = Number(trangThaiDuyet) || 0;
+        const todayStr = new Date().toISOString().split("T")[0];
 
         const newSD = await DonSuaDoi_NH_VN.create(
             {
                 maDonDangKy: null,
                 maDonDangKyGoc: targetMaDonGoc,
-                soDon: targetSoDon || donCu.soDon,
-                ngayYeuCau: ngayYeuCau || new Date().toISOString().split("T")[0],
+                soDon: targetSoDon,
+                ngayYeuCau: ngayYeuCau || todayStr,
                 lanSuaDoi: actualLanSuaDoi,
-                ngayGhiNhanSuaDoi: ngayGhiNhanSuaDoi || null,
-                duocGhiNhanSuaDoi: Boolean(duocGhiNhanSuaDoi),
+                // Chỉ ghi nhận ngày sửa đổi khi được chấp thuận (approve sẽ set lại)
+                ngayGhiNhanSuaDoi: parsedTrangThaiDuyet === 1 ? ngayGhiNhanSuaDoi || null : null,
+                duocGhiNhanSuaDoi: parsedTrangThaiDuyet === 1 ? Boolean(duocGhiNhanSuaDoi) : false,
                 moTa: moTaSuaDoi || moTa || null,
                 suaDoiDaiDien: Boolean(suaDoiDaiDien),
                 ndSuaDoiDaiDien: ndSuaDoiDaiDien || null,
@@ -425,9 +604,15 @@ export const addApplicationSDNHVN = async (req, res) => {
                 suaNhomSPDV: Boolean(suaNhomSPDV),
                 ndSuaNhomSPDV: ndSuaNhomSPDV || null,
                 suaDoiNoiDungKhac: Boolean(suaDoiNoiDungKhac),
+                ndSuaDoiNoiDungKhac: ndSuaDoiNoiDungKhac || null,
+                giayUyQuyenGoc: giayUyQuyenGoc === undefined || giayUyQuyenGoc === null ? null : Boolean(giayUyQuyenGoc),
+                maUyQuyen: maUyQuyen || null,
+                idGUQ: idGUQ || null,
+                hanTraLoi: null,
+                tuDongTuChoi: false,
                 trangThaiDuyet: parsedTrangThaiDuyet === 2 ? 2 : 0,
                 ngayChapThuan: null,
-                ngayTuChoi: parsedTrangThaiDuyet === 2 ? ngayTuChoi || new Date().toISOString().split("T")[0] : null,
+                ngayTuChoi: parsedTrangThaiDuyet === 2 ? ngayTuChoi || todayStr : null,
                 lyDoTuChoi: parsedTrangThaiDuyet === 2 ? lyDoTuChoi || null : null,
                 duLieuThayDoi: mergedDuLieuThayDoi,
                 maNhanSuCapNhap: req.user?.maNhanSu || maNhanSuCapNhap || null,
@@ -495,6 +680,10 @@ export const updateApplicationSD_VN = async (req, res) => {
             suaNhomSPDV,
             ndSuaNhomSPDV,
             suaDoiNoiDungKhac,
+            ndSuaDoiNoiDungKhac,
+            giayUyQuyenGoc,
+            maUyQuyen,
+            idGUQ,
             trangThaiDuyet,
             ngayChapThuan,
             ngayTuChoi,
@@ -522,80 +711,173 @@ export const updateApplicationSD_VN = async (req, res) => {
             return res.status(404).json({ message: "Không tìm thấy tờ khai sửa đổi đơn đăng ký nhãn hiệu!" });
         }
 
-        const existingDuLieu =
-            typeof record.duLieuThayDoi === "string"
-                ? (() => {
-                      try {
-                          return JSON.parse(record.duLieuThayDoi);
-                      } catch {
-                          return {};
-                      }
-                  })()
-                : record.duLieuThayDoi || {};
+        const currentStatus = Number(record.trangThaiDuyet);
+        const hasNextStatus = trangThaiDuyet !== undefined && trangThaiDuyet !== null && trangThaiDuyet !== "";
+        const nextStatus = hasNextStatus ? Number(trangThaiDuyet) : currentStatus;
+        if (![0, 1, 2].includes(nextStatus)) {
+            await transaction.rollback();
+            return res.status(400).json({ message: "trangThaiDuyet không hợp lệ (0, 1 hoặc 2)." });
+        }
+        const staysApproved = currentStatus === 1 && nextStatus === 1;
 
-        const updatedDuLieu =
-            duLieuThayDoi !== undefined
-                ? { ...existingDuLieu, ...(typeof duLieuThayDoi === "object" ? duLieuThayDoi : {}) }
-                : existingDuLieu;
+        // Kiểm tra ít nhất 1 mục sửa đổi nếu request có cập nhật các cờ sửa đổi
+        const hasAnyFlagInBody = [
+            suaDoiDaiDien,
+            suaDoiTenChuDon,
+            suaDoiDiaChi,
+            suaNhan,
+            suaNhomSPDV,
+            suaDoiNoiDungKhac,
+        ].some((v) => v !== undefined);
+        if (hasAnyFlagInBody) {
+            const mergedHasAny = Boolean(
+                (suaDoiDaiDien ?? record.suaDoiDaiDien) ||
+                (suaDoiTenChuDon ?? record.suaDoiTenChuDon) ||
+                (suaDoiDiaChi ?? record.suaDoiDiaChi) ||
+                (suaNhan ?? record.suaNhan) ||
+                (suaNhomSPDV ?? record.suaNhomSPDV) ||
+                (suaDoiNoiDungKhac ?? record.suaDoiNoiDungKhac)
+            );
+            if (!mergedHasAny) {
+                await transaction.rollback();
+                return res.status(400).json({ message: "Vui lòng chọn ít nhất một mục cần sửa đổi!" });
+            }
+        }
 
-        await record.update(
-            {
-                soDon: soDonSD ?? soDon ?? record.soDon,
-                ngayYeuCau: ngayYeuCau ?? record.ngayYeuCau,
-                lanSuaDoi: lanSuaDoi ?? record.lanSuaDoi,
-                ngayGhiNhanSuaDoi: ngayGhiNhanSuaDoi ?? record.ngayGhiNhanSuaDoi,
-                duocGhiNhanSuaDoi: duocGhiNhanSuaDoi ?? record.duocGhiNhanSuaDoi,
-                moTa: moTaSuaDoi ?? moTa ?? record.moTa,
-                suaDoiDaiDien: suaDoiDaiDien ?? record.suaDoiDaiDien,
-                ndSuaDoiDaiDien: ndSuaDoiDaiDien ?? record.ndSuaDoiDaiDien,
-                suaDoiTenChuDon: suaDoiTenChuDon ?? record.suaDoiTenChuDon,
-                ndSuaDoiTenChuDon: ndSuaDoiTenChuDon ?? record.ndSuaDoiTenChuDon,
-                suaDoiDiaChi: suaDoiDiaChi ?? record.suaDoiDiaChi,
-                ndSuaDoiDiaChi: ndSuaDoiDiaChi ?? record.ndSuaDoiDiaChi,
-                suaNhan: suaNhan ?? record.suaNhan,
-                ndSuaNhan: ndSuaNhan ?? record.ndSuaNhan,
-                suaNhomSPDV: suaNhomSPDV ?? record.suaNhomSPDV,
-                ndSuaNhomSPDV: ndSuaNhomSPDV ?? record.ndSuaNhomSPDV,
-                suaDoiNoiDungKhac: suaDoiNoiDungKhac ?? record.suaDoiNoiDungKhac,
-                duLieuThayDoi: updatedDuLieu,
-                maNhanSuCapNhap: req.user?.maNhanSu || maNhanSuCapNhap || record.maNhanSuCapNhap,
-            },
-            { transaction }
-        );
+        const existingDuLieu = parseJsonObject(record.duLieuThayDoi);
+        const taiLieuSuaDoiNorm = normalizeTaiLieuSuaDoi(req.body.taiLieuSuaDoi ?? req.body.taiLieuList);
+
+        // ===== Khi đã chấp thuận và giữ nguyên trạng thái 1: chỉ cho sửa trường hành chính =====
+        if (staysApproved) {
+            const normText = (v) => (v === undefined || v === null ? "" : String(v).trim());
+            const normBool = (v) => Boolean(v);
+            const coreChecks = [
+                ["suaDoiDaiDien", suaDoiDaiDien, normBool],
+                ["ndSuaDoiDaiDien", ndSuaDoiDaiDien, normText],
+                ["suaDoiTenChuDon", suaDoiTenChuDon, normBool],
+                ["ndSuaDoiTenChuDon", ndSuaDoiTenChuDon, normText],
+                ["suaDoiDiaChi", suaDoiDiaChi, normBool],
+                ["ndSuaDoiDiaChi", ndSuaDoiDiaChi, normText],
+                ["suaNhan", suaNhan, normBool],
+                ["ndSuaNhan", ndSuaNhan, normText],
+                ["suaNhomSPDV", suaNhomSPDV, normBool],
+                ["ndSuaNhomSPDV", ndSuaNhomSPDV, normText],
+                ["suaDoiNoiDungKhac", suaDoiNoiDungKhac, normBool],
+                ["ndSuaDoiNoiDungKhac", ndSuaDoiNoiDungKhac, normText],
+                ["giayUyQuyenGoc", giayUyQuyenGoc, (v) => (v === null || v === undefined ? "" : String(Boolean(v)))],
+                ["maUyQuyen", maUyQuyen, normText],
+                ["idGUQ", idGUQ, (v) => (v === null || v === undefined || v === "" ? "" : String(v))],
+            ];
+            const changed = coreChecks.filter(([key, incoming, norm]) => incoming !== undefined && norm(incoming) !== norm(record[key]));
+            if (changed.length > 0) {
+                await transaction.rollback();
+                return res.status(400).json({
+                    message:
+                        "Tờ khai đã được chấp thuận, không thể sửa nội dung sửa đổi cốt lõi (" +
+                        changed.map(([k]) => k).join(", ") +
+                        "). Vui lòng chuyển trạng thái về 'Chưa chấp thuận' trước khi chỉnh sửa.",
+                });
+            }
+        }
+
+        // ===== Gộp duLieuThayDoi =====
+        let updatedDuLieu = existingDuLieu;
+        if (staysApproved) {
+            if (taiLieuSuaDoiNorm !== undefined) updatedDuLieu = { ...existingDuLieu, taiLieuSuaDoi: taiLieuSuaDoiNorm };
+        } else {
+            const extra = {};
+            for (const k of ["idKhachHangMoi", "idKhachHang", "idDoiTac", "maNhanHieu", "nhanHieu", "maSPDVList", "daiDienSHTT"]) {
+                if (req.body[k] !== undefined) extra[k] = req.body[k];
+            }
+            updatedDuLieu = {
+                ...existingDuLieu,
+                ...(duLieuThayDoi !== undefined && typeof duLieuThayDoi === "object" && duLieuThayDoi !== null ? duLieuThayDoi : {}),
+                ...extra,
+                ...(taiLieuSuaDoiNorm !== undefined ? { taiLieuSuaDoi: taiLieuSuaDoiNorm } : {}),
+            };
+        }
+
+        const rawIncomingSoDon = soDonSD !== undefined ? soDonSD : soDon;
+        const incomingSoDon = normalizeOptionalSoDon(rawIncomingSoDon);
+        const resolvedSoDon = nextStatus === 2 ? null : (incomingSoDon !== undefined ? incomingSoDon : record.soDon);
+
+        const adminFields = {
+            soDon: resolvedSoDon,
+            ngayYeuCau: ngayYeuCau ?? record.ngayYeuCau,
+            moTa: moTaSuaDoi ?? moTa ?? record.moTa,
+            duLieuThayDoi: updatedDuLieu,
+            maNhanSuCapNhap: req.user?.maNhanSu || maNhanSuCapNhap || record.maNhanSuCapNhap,
+        };
+        const coreFields = staysApproved
+            ? {}
+            : {
+                  lanSuaDoi: lanSuaDoi ?? record.lanSuaDoi,
+                  suaDoiDaiDien: suaDoiDaiDien ?? record.suaDoiDaiDien,
+                  ndSuaDoiDaiDien: ndSuaDoiDaiDien ?? record.ndSuaDoiDaiDien,
+                  suaDoiTenChuDon: suaDoiTenChuDon ?? record.suaDoiTenChuDon,
+                  ndSuaDoiTenChuDon: ndSuaDoiTenChuDon ?? record.ndSuaDoiTenChuDon,
+                  suaDoiDiaChi: suaDoiDiaChi ?? record.suaDoiDiaChi,
+                  ndSuaDoiDiaChi: ndSuaDoiDiaChi ?? record.ndSuaDoiDiaChi,
+                  suaNhan: suaNhan ?? record.suaNhan,
+                  ndSuaNhan: ndSuaNhan ?? record.ndSuaNhan,
+                  suaNhomSPDV: suaNhomSPDV ?? record.suaNhomSPDV,
+                  ndSuaNhomSPDV: ndSuaNhomSPDV ?? record.ndSuaNhomSPDV,
+                  suaDoiNoiDungKhac: suaDoiNoiDungKhac ?? record.suaDoiNoiDungKhac,
+                  ndSuaDoiNoiDungKhac: ndSuaDoiNoiDungKhac ?? record.ndSuaDoiNoiDungKhac,
+                  giayUyQuyenGoc: giayUyQuyenGoc ?? record.giayUyQuyenGoc,
+                  maUyQuyen: maUyQuyen ?? record.maUyQuyen,
+                  idGUQ: idGUQ === undefined ? record.idGUQ : idGUQ || null,
+                  // Đơn chờ / từ chối không lưu ngày ghi nhận sửa đổi (nextStatus === 1 sẽ set lại khi duyệt)
+                  ngayGhiNhanSuaDoi: nextStatus === 1 ? ngayGhiNhanSuaDoi ?? record.ngayGhiNhanSuaDoi : null,
+                  duocGhiNhanSuaDoi: nextStatus === 1 ? duocGhiNhanSuaDoi ?? record.duocGhiNhanSuaDoi : false,
+              };
+        if (staysApproved) {
+            adminFields.ngayGhiNhanSuaDoi = ngayGhiNhanSuaDoi ?? record.ngayGhiNhanSuaDoi;
+        }
+
+        await record.update({ ...adminFields, ...coreFields }, { transaction });
 
         let donMoi = null;
-        if (trangThaiDuyet !== undefined && trangThaiDuyet !== null) {
-            const nextStatus = Number(trangThaiDuyet);
-            if (nextStatus === 1) {
-                const approved = await approveDonSuaDoi_NH_VN(record, req.body, transaction);
-                donMoi = approved.donMoi;
-            } else if (nextStatus === 2) {
-                await rollbackSpawnedChildDon(record, transaction);
-                await record.update(
-                    {
-                        trangThaiDuyet: 2,
-                        maDonDangKy: null,
-                        ngayChapThuan: null,
-                        ngayTuChoi: ngayTuChoi || record.ngayTuChoi || new Date().toISOString().split("T")[0],
-                        lyDoTuChoi: lyDoTuChoi !== undefined ? lyDoTuChoi : record.lyDoTuChoi,
-                        duocGhiNhanSuaDoi: false,
-                    },
-                    { transaction }
-                );
-            } else if (nextStatus === 0) {
-                await rollbackSpawnedChildDon(record, transaction);
-                await record.update(
-                    {
-                        trangThaiDuyet: 0,
-                        maDonDangKy: null,
-                        ngayChapThuan: null,
-                        ngayTuChoi: null,
-                        lyDoTuChoi: null,
-                        duocGhiNhanSuaDoi: false,
-                    },
-                    { transaction }
-                );
-            }
+        if (nextStatus === 1) {
+            const approved = await approveDonSuaDoi_NH_VN(record, req.body, transaction);
+            donMoi = approved.donMoi;
+            await record.update({ hanTraLoi: null, tuDongTuChoi: false }, { transaction });
+        } else if (nextStatus === 2) {
+            await rollbackSpawnedChildDon(record, transaction);
+            await record.update(
+                {
+                    trangThaiDuyet: 2,
+                    maDonDangKy: null,
+                    soDon: null,
+                    ngayChapThuan: null,
+                    ngayGhiNhanSuaDoi: null,
+                    ngayTuChoi: ngayTuChoi || record.ngayTuChoi || new Date().toISOString().split("T")[0],
+                    lyDoTuChoi: lyDoTuChoi !== undefined ? lyDoTuChoi : record.lyDoTuChoi,
+                    duocGhiNhanSuaDoi: false,
+                    hanTraLoi: null,
+                    // Giữ cờ tự động từ chối nếu chỉ sửa thông tin khi đơn đã ở trạng thái 2
+                    tuDongTuChoi: currentStatus === 2 && req.body.tuDongTuChoi !== false ? Boolean(record.tuDongTuChoi) : false,
+                },
+                { transaction }
+            );
+        } else {
+            // nextStatus === 0 (giữ nguyên chờ duyệt hoặc mở lại)
+            await rollbackSpawnedChildDon(record, transaction);
+            await record.update(
+                {
+                    trangThaiDuyet: 0,
+                    maDonDangKy: null,
+                    ngayChapThuan: null,
+                    ngayGhiNhanSuaDoi: null,
+                    ngayTuChoi: null,
+                    lyDoTuChoi: null,
+                    duocGhiNhanSuaDoi: false,
+                    tuDongTuChoi: false,
+                },
+                { transaction }
+            );
+            await syncActiveHanTraLoi(record.id, transaction);
+            await record.reload({ transaction });
         }
 
         await transaction.commit();
@@ -623,7 +905,7 @@ export const updateApplicationSD_VN = async (req, res) => {
  */
 export const getApplicationSD_VNDetail = async (req, res) => {
     try {
-        const id = req.params?.id || req.body?.id || req.body?.idDonSuaDoi;
+        const id = req.params?.id || req.body?.id || req.body?.idDonSuaDoi || req.query?.id;
         const { maDonDangKy, maDonDangKyGoc } = req.body || {};
 
         const whereCondition = {};
@@ -634,33 +916,53 @@ export const getApplicationSD_VNDetail = async (req, res) => {
             return res.status(400).json({ message: "Thiếu id hoặc maDonDangKy / maDonDangKyGoc!" });
         }
 
+        // Kiểm tra quá hạn nhẹ cho đúng bản ghi này (+ quét toàn cục có throttle)
+        if (id) await autoRejectExpiredDonSuaDoi({ id: Number(id) });
+        await autoRejectExpiredDonSuaDoi();
+
+        const donInclude = () => [
+            { model: NhanHieu, as: "nhanHieu", attributes: ["maNhanHieu", "tenNhanHieu", "linkAnh", "moTa"] },
+            {
+                model: KhachHangCuoi,
+                as: "khachHang",
+                include: [{ model: QuocGia, as: "quocGia", attributes: ["maQuocGia", "tenQuocGia"] }],
+            },
+            {
+                model: DoiTac,
+                as: "doitac",
+                attributes: ["id", "maDoiTac", "tenDoiTac", "maQuocGia", "diaChi", "sdt", "email"],
+            },
+            {
+                model: GiayUyQuyen,
+                as: "GiayUyQuyen",
+                required: false,
+                attributes: ["id", "soGUQ", "soDonGoc", "ngayUyQuyen", "ngayHetHan", "loaiGUQ"],
+            },
+            {
+                model: DonDK_SPDV,
+                attributes: ["maSPDV"],
+                required: false,
+                include: [{ model: SanPham_DichVu, as: "SanPham_DichVu", attributes: ["maSPDV", "tenSPDV"] }],
+            },
+        ];
+
         const record = await DonSuaDoi_NH_VN.findOne({
             where: whereCondition,
             include: [
+                { model: DonDangKy, as: "donMoi", required: false, include: donInclude() },
+                { model: DonDangKy, as: "donGoc", required: false, include: donInclude() },
+                { model: LichSuPhanHoiSuaDoi_NH_VN, as: "lichSuPhanHoi", required: false },
                 {
-                    model: DonDangKy,
-                    as: "donMoi",
+                    model: GiayUyQuyen,
+                    as: "giayUyQuyen",
                     required: false,
-                    include: [
-                        { model: NhanHieu, as: "nhanHieu" },
-                        { model: KhachHangCuoi, as: "khachHang" },
-                        { model: DoiTac, as: "doitac" },
-                        { model: DonDK_SPDV, attributes: ["maSPDV"] },
-                    ],
-                },
-                {
-                    model: DonDangKy,
-                    as: "donGoc",
-                    required: false,
-                    include: [
-                        { model: NhanHieu, as: "nhanHieu" },
-                        { model: KhachHangCuoi, as: "khachHang" },
-                        { model: DoiTac, as: "doitac" },
-                        { model: DonDK_SPDV, attributes: ["maSPDV"] },
-                    ],
                 },
             ],
-            order: [["createdAt", "DESC"]],
+            order: [
+                ["createdAt", "DESC"],
+                [{ model: LichSuPhanHoiSuaDoi_NH_VN, as: "lichSuPhanHoi" }, "lanThongBao", "ASC"],
+                [{ model: LichSuPhanHoiSuaDoi_NH_VN, as: "lichSuPhanHoi" }, "id", "ASC"],
+            ],
         });
 
         if (!record) {
@@ -668,13 +970,246 @@ export const getApplicationSD_VNDetail = async (req, res) => {
         }
 
         const plain = record.toJSON();
+        const isApproved = Number(plain.trangThaiDuyet) === 1;
+
+        // Nhân sự cập nhật
+        let nhanSuCapNhap = null;
+        if (plain.maNhanSuCapNhap) {
+            nhanSuCapNhap = await NhanSu.findOne({
+                where: { maNhanSu: plain.maNhanSuCapNhap },
+                attributes: ["maNhanSu", "hoTen"],
+                raw: true,
+            }).catch(() => null);
+        }
+
+        // Phả hệ sửa đổi nối tiếp (không select cột LONGTEXT / JSON)
+        const seedList = [plain.maDonDangKyGoc, plain.maDonDangKy].filter(Boolean);
+        const { graph, family } = await resolveFamily(seedList);
+        const { rootMaDon } = graph.getRootAndDepth(plain.maDonDangKyGoc);
+        const [donGocBanDau, chainRows] = await Promise.all([
+            DonDangKy.findOne({
+                where: { maDonDangKy: rootMaDon },
+                attributes: ["maDonDangKy", "soDon", "ngayNopDon", "loaiDon", "maHoSo", "maHoSoVuViec"],
+                raw: true,
+            }),
+            DonSuaDoi_NH_VN.findAll({
+                where: { maDonDangKyGoc: { [Op.in]: family.length ? family : [plain.maDonDangKyGoc] } },
+                attributes: [
+                    "id", "soDon", "lanSuaDoi", "ngayYeuCau", "ngayGhiNhanSuaDoi", "trangThaiDuyet",
+                    "maDonDangKy", "maDonDangKyGoc", "ngayChapThuan", "ngayTuChoi", "hanTraLoi",
+                    "tuDongTuChoi", "createdAt",
+                ],
+                order: [["lanSuaDoi", "ASC"], ["createdAt", "ASC"], ["id", "ASC"]],
+                raw: true,
+            }),
+        ]);
+
+        const chuoiSuaDoi = chainRows.map((item) => ({
+            ...item,
+            ngayGhiNhanSuaDoi: Number(item.trangThaiDuyet) === 1 ? item.ngayGhiNhanSuaDoi : null,
+            isCurrent: item.id === plain.id,
+        }));
+
+        const duLieu = parseJsonObject(plain.duLieuThayDoi);
+        const dsPhanHoi = plain.lichSuPhanHoi || [];
+
+        const isRejected = Number(plain.trangThaiDuyet) === 2;
+        plain.soDon = isRejected ? null : (normalizeOptionalSoDon(plain.soDon) ?? null);
+        plain.ngayGhiNhanSuaDoi = isApproved ? plain.ngayGhiNhanSuaDoi : null;
         plain.soDonSD = plain.soDon;
         plain.soDonGoc = plain.donGoc?.soDon || null;
         plain.ngayNopDonGoc = plain.donGoc?.ngayNopDon || null;
+        plain.donGocBanDau = donGocBanDau || null;
+        plain.loaiDonGoc = donGocBanDau?.loaiDon ?? null;
+        plain.chuoiSuaDoi = chuoiSuaDoi;
+        plain.capDoSuaDoi = plain.lanSuaDoi ?? chuoiSuaDoi.findIndex((x) => x.isCurrent) + 1;
+        plain.dangChoTraLoiCuc = dsPhanHoi.some((p) => !p.ngayTraLoi);
+        plain.taiLieuSuaDoi = Array.isArray(duLieu.taiLieuSuaDoi) ? duLieu.taiLieuSuaDoi : [];
+        plain.giayUyQuyenSuaDoi = {
+            giayUyQuyenGoc: plain.giayUyQuyenGoc ?? null,
+            maUyQuyen: plain.maUyQuyen || null,
+            idGUQ: plain.idGUQ ?? null,
+            giayUyQuyen: plain.giayUyQuyen || null,
+        };
+        plain.nhanSuCapNhap = nhanSuCapNhap;
+        plain.tenNhanSuCapNhap = nhanSuCapNhap?.hoTen || null;
 
         return res.status(200).json(plain);
     } catch (error) {
         console.error("❌ Lỗi lấy chi tiết đơn sửa đổi:", error);
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * =========================================================================
+ * VÒNG PHẢN HỒI VỚI CỤC SHTT
+ * POST /api/application_sd_nh_vn/phan-hoi/save
+ * =========================================================================
+ */
+export const savePhanHoiSuaDoi = async (req, res) => {
+    const transaction = await sequelize.transaction();
+    try {
+        const body = req.body || {};
+        const idDonSuaDoi = body.idDonSuaDoi ?? body.donSuaDoiId;
+        const phanHoiId = body.id ?? body.phanHoiId ?? null;
+
+        if (!idDonSuaDoi) {
+            await transaction.rollback();
+            return res.status(400).json({ message: "Thiếu idDonSuaDoi." });
+        }
+
+        const don = await DonSuaDoi_NH_VN.findByPk(idDonSuaDoi, {
+            transaction,
+            lock: transaction.LOCK.UPDATE,
+        });
+        if (!don) {
+            await transaction.rollback();
+            return res.status(404).json({ message: "Không tìm thấy tờ khai sửa đổi." });
+        }
+
+        const FIELDS = [
+            "soThongBao", "ngayNhanThongBao", "hanTraLoi", "noiDungThongBao", "tenFileThongBao", "linkFileThongBao",
+            "ngayTraLoi", "noiDungTraLoi", "tenFileTraLoi", "linkFileTraLoi",
+        ];
+        const pickFields = () => {
+            const out = {};
+            for (const k of FIELDS) {
+                if (body[k] !== undefined) out[k] = body[k] === "" ? null : body[k];
+            }
+            return out;
+        };
+        const maNhanSuCapNhap = req.user?.maNhanSu || body.maNhanSuCapNhap || null;
+
+        let phanHoi;
+        if (!phanHoiId) {
+            if (Number(don.trangThaiDuyet) === 1) {
+                await transaction.rollback();
+                return res.status(400).json({ message: "Tờ khai đã được chấp thuận, không thể thêm vòng thông báo mới." });
+            }
+            const data = pickFields();
+            if (!data.ngayNhanThongBao || !data.hanTraLoi) {
+                await transaction.rollback();
+                return res.status(400).json({ message: "Thiếu ngayNhanThongBao hoặc hanTraLoi của thông báo Cục." });
+            }
+            if (String(data.hanTraLoi) < String(data.ngayNhanThongBao)) {
+                await transaction.rollback();
+                return res.status(400).json({ message: "Hạn trả lời không được nhỏ hơn ngày nhận thông báo." });
+            }
+            const maxLan = (await LichSuPhanHoiSuaDoi_NH_VN.max("lanThongBao", { where: { idDonSuaDoi }, transaction })) || 0;
+            phanHoi = await LichSuPhanHoiSuaDoi_NH_VN.create(
+                { ...data, idDonSuaDoi, lanThongBao: maxLan + 1, maNhanSuCapNhap },
+                { transaction }
+            );
+        } else {
+            phanHoi = await LichSuPhanHoiSuaDoi_NH_VN.findOne({ where: { id: phanHoiId, idDonSuaDoi }, transaction });
+            if (!phanHoi) {
+                await transaction.rollback();
+                return res.status(404).json({ message: "Không tìm thấy vòng phản hồi." });
+            }
+            const data = pickFields();
+            const nhan = data.ngayNhanThongBao ?? phanHoi.ngayNhanThongBao;
+            const han = data.hanTraLoi ?? phanHoi.hanTraLoi;
+            if (!han || !nhan || String(han) < String(nhan)) {
+                await transaction.rollback();
+                return res.status(400).json({ message: "Hạn trả lời không hợp lệ (thiếu hoặc nhỏ hơn ngày nhận thông báo)." });
+            }
+            await phanHoi.update({ ...data, maNhanSuCapNhap: maNhanSuCapNhap || phanHoi.maNhanSuCapNhap }, { transaction });
+        }
+
+        // Mở lại đơn bị hệ thống tự động từ chối
+        let reopened = false;
+        if (body.reopenIfAutoRejected === true && Number(don.trangThaiDuyet) === 2 && don.tuDongTuChoi) {
+            await don.update(
+                { trangThaiDuyet: 0, tuDongTuChoi: false, ngayTuChoi: null, lyDoTuChoi: null },
+                { transaction }
+            );
+            reopened = true;
+        }
+
+        const hanTraLoi = await syncActiveHanTraLoi(idDonSuaDoi, transaction);
+        await don.reload({ transaction });
+        await transaction.commit();
+
+        const warning =
+            hanTraLoi && String(hanTraLoi) < todayVN()
+                ? "Hạn trả lời của vòng chưa trả lời đã quá hạn, hệ thống sẽ tự động chuyển Từ chối nếu không nhập ngày trả lời."
+                : null;
+
+        return res.status(200).json({
+            message: reopened ? "Đã lưu vòng phản hồi và mở lại tờ khai." : "Lưu vòng phản hồi thành công.",
+            phanHoi,
+            hanTraLoi,
+            reopened,
+            warning,
+            donSuaDoi: {
+                id: don.id,
+                trangThaiDuyet: don.trangThaiDuyet,
+                tuDongTuChoi: don.tuDongTuChoi,
+                hanTraLoi: don.hanTraLoi,
+            },
+        });
+    } catch (error) {
+        if (transaction && !transaction.finished) await transaction.rollback();
+        console.error("❌ Lỗi lưu vòng phản hồi sửa đổi:", error);
+        return res.status(500).json({ message: error.message });
+    }
+};
+
+/**
+ * POST /api/application_sd_nh_vn/phan-hoi/delete  |  DELETE /api/application_sd_nh_vn/phan-hoi/:phanHoiId
+ */
+export const deletePhanHoiSuaDoi = async (req, res) => {
+    const transaction = await sequelize.transaction();
+    try {
+        const phanHoiId = req.params?.phanHoiId || req.body?.id || req.body?.phanHoiId;
+        if (!phanHoiId) {
+            await transaction.rollback();
+            return res.status(400).json({ message: "Thiếu id vòng phản hồi cần xóa." });
+        }
+
+        const phanHoi = await LichSuPhanHoiSuaDoi_NH_VN.findByPk(phanHoiId, { transaction });
+        if (!phanHoi) {
+            await transaction.rollback();
+            return res.status(404).json({ message: "Không tìm thấy vòng phản hồi." });
+        }
+        const idDonSuaDoi = phanHoi.idDonSuaDoi;
+        const don = await DonSuaDoi_NH_VN.findByPk(idDonSuaDoi, { transaction, lock: transaction.LOCK.UPDATE });
+        if (!don) {
+            await transaction.rollback();
+            return res.status(404).json({ message: "Không tìm thấy tờ khai sửa đổi." });
+        }
+        if (Number(don.trangThaiDuyet) === 1) {
+            await transaction.rollback();
+            return res.status(400).json({ message: "Tờ khai đã được chấp thuận, không thể xóa vòng phản hồi." });
+        }
+
+        await phanHoi.destroy({ transaction });
+
+        // Đánh lại thứ tự lanThongBao liên tục 1..n
+        const remaining = await LichSuPhanHoiSuaDoi_NH_VN.findAll({
+            where: { idDonSuaDoi },
+            attributes: ["id", "lanThongBao"],
+            order: [["lanThongBao", "ASC"], ["id", "ASC"]],
+            transaction,
+        });
+        for (let i = 0; i < remaining.length; i++) {
+            if (remaining[i].lanThongBao !== i + 1) {
+                await remaining[i].update({ lanThongBao: i + 1 }, { transaction });
+            }
+        }
+
+        const hanTraLoi = await syncActiveHanTraLoi(idDonSuaDoi, transaction);
+        await transaction.commit();
+
+        return res.status(200).json({
+            message: "Đã xóa vòng phản hồi.",
+            data: { id: Number(phanHoiId), idDonSuaDoi },
+            hanTraLoi,
+        });
+    } catch (error) {
+        if (transaction && !transaction.finished) await transaction.rollback();
+        console.error("❌ Lỗi xóa vòng phản hồi sửa đổi:", error);
         return res.status(500).json({ message: error.message });
     }
 };
@@ -687,6 +1222,9 @@ export const getApplicationSD_VNDetail = async (req, res) => {
  */
 export const getAllApplicationSD_VN = async (req, res) => {
     try {
+        // Quét tự động từ chối đơn quá hạn (đã throttle 60s)
+        await autoRejectExpiredDonSuaDoi();
+
         const {
             maSPDVList,
             trangThaiDon,
@@ -702,6 +1240,8 @@ export const getAllApplicationSD_VN = async (req, res) => {
             pageIndex = 1,
             pageSize = 20,
         } = req.body || {};
+        const hanTraLoiFilter = filterCondition?.hanTraLoiFilter ?? req.body?.hanTraLoiFilter;
+        const sortByHanTraLoi = filterCondition?.sortByHanTraLoi ?? req.body?.sortByHanTraLoi;
 
         const effectiveCustomerName = customerName || req.body?.tenKhachHang || req.body?.maKhachHang;
         const effectivePartnerName = partnerName || req.body?.tenDoiTac || req.body?.maDoiTac;
@@ -719,6 +1259,23 @@ export const getAllApplicationSD_VN = async (req, res) => {
         if (soDon) {
             whereCondition.soDon = { [Op.like]: `%${String(soDon).trim()}%` };
         }
+
+        // Lọc hạn trả lời dựa trên DonSuaDoi_NH_VN.hanTraLoi (index kép trangThaiDuyet + hanTraLoi)
+        if (hanTraLoiFilter) {
+            const today = todayVN();
+            const addDays = (n) => new Date(new Date(`${today}T00:00:00Z`).getTime() + n * 86400000).toISOString().slice(0, 10);
+            if (["<7", "<15", "<30"].includes(hanTraLoiFilter)) {
+                whereCondition.hanTraLoi = { [Op.between]: [today, addDays(Number(hanTraLoiFilter.slice(1)))] };
+            } else if (hanTraLoiFilter === "overdue") {
+                whereCondition.hanTraLoi = { [Op.lt]: today };
+            }
+        }
+        const listOrder = [];
+        if (sortByHanTraLoi) {
+            listOrder.push([literal("`DonSuaDoi_NH_VN`.`hanTraLoi` IS NULL"), "ASC"]);
+            listOrder.push(["hanTraLoi", String(sortByHanTraLoi).toLowerCase() === "desc" ? "DESC" : "ASC"]);
+        }
+        listOrder.push(["updatedAt", "DESC"], ["createdAt", "DESC"]);
 
         const allRecords = await DonSuaDoi_NH_VN.findAll({
             where: whereCondition,
@@ -748,7 +1305,7 @@ export const getAllApplicationSD_VN = async (req, res) => {
                     ],
                 },
             ],
-            order: [["updatedAt", "DESC"], ["createdAt", "DESC"]],
+            order: listOrder,
         });
 
         const matchTokens = (textVal, query) => {
@@ -806,9 +1363,45 @@ export const getAllApplicationSD_VN = async (req, res) => {
         const totalItems = filtered.length;
         const pagedRecords = filtered.slice(offset, offset + Number(pageSize));
 
+        // Tổng hợp vòng phản hồi (1 truy vấn GROUP BY) + loại đơn gốc ban đầu (1 truy vấn Op.in) - tránh N+1
+        const pagedIds = pagedRecords.map((r) => r.id);
+        const phanHoiStats = pagedIds.length
+            ? await LichSuPhanHoiSuaDoi_NH_VN.findAll({
+                  attributes: [
+                      "idDonSuaDoi",
+                      [fn("COUNT", col("id")), "soLan"],
+                      [fn("SUM", literal("CASE WHEN ngayTraLoi IS NULL THEN 1 ELSE 0 END")), "chuaTraLoi"],
+                  ],
+                  where: { idDonSuaDoi: { [Op.in]: pagedIds } },
+                  group: ["idDonSuaDoi"],
+                  raw: true,
+              })
+            : [];
+        const phanHoiStatMap = new Map(phanHoiStats.map((s) => [s.idDonSuaDoi, s]));
+
+        const loaiDonGocMap = new Map();
+        if (pagedRecords.length) {
+            const graph = await getDonLineageGraph();
+            const rootOf = new Map();
+            for (const r of pagedRecords) {
+                rootOf.set(r.id, graph.getRootAndDepth(r.maDonDangKyGoc).rootMaDon);
+            }
+            const rootDons = await DonDangKy.findAll({
+                where: { maDonDangKy: { [Op.in]: [...new Set(rootOf.values())] } },
+                attributes: ["maDonDangKy", "loaiDon"],
+                raw: true,
+            });
+            const loaiByMa = new Map(rootDons.map((d) => [d.maDonDangKy, d.loaiDon]));
+            for (const [recId, rootMa] of rootOf) loaiDonGocMap.set(recId, loaiByMa.get(rootMa) ?? null);
+        }
+
         const result = pagedRecords.map((rec) => {
             const app = rec.donMoi || rec.donGoc || {};
             const donGocObj = rec.donGoc || null;
+            const isApproved = Number(rec.trangThaiDuyet) === 1;
+            const isRejected = Number(rec.trangThaiDuyet) === 2;
+            const effectiveSoDonSD = isRejected ? null : (normalizeOptionalSoDon(rec.soDon) ?? null);
+            const phanHoiStat = phanHoiStatMap.get(rec.id);
 
             const fieldMap = {
                 maDonDangKy: () => rec.maDonDangKy || app.maDonDangKy,
@@ -842,13 +1435,13 @@ export const getAllApplicationSD_VN = async (req, res) => {
                 taiLieuChuaNop: () => app.taiLieuChuaNop?.map((tl) => ({ tenTaiLieu: tl.tenTaiLieu })) || [],
                 dsSPDV: () => app.DonDK_SPDVs?.map((sp) => ({ maSPDV: sp.maSPDV })) || [],
                 hanXuLy: () => app.hanXuLy,
-                hanTraLoi: () => app.hanTraLoi,
+                hanTraLoi: () => rec.hanTraLoi || null,
                 linkAnh: () => app.nhanHieu?.linkAnh || null,
                 donGoc: () => app.donGoc ?? 0,
-                soDonSD: () => rec.soDon || null,
+                soDonSD: () => effectiveSoDonSD,
                 ngayYeuCau: () => rec.ngayYeuCau || null,
                 lanSuaDoi: () => rec.lanSuaDoi ?? null,
-                ngayGhiNhanSuaDoi: () => rec.ngayGhiNhanSuaDoi || null,
+                ngayGhiNhanSuaDoi: () => (isApproved ? rec.ngayGhiNhanSuaDoi || null : null),
                 duocGhiNhanSuaDoi: () => rec.duocGhiNhanSuaDoi ?? null,
                 moTaSuaDoi: () => rec.moTa || null,
                 moTa: () => rec.moTa || null,
@@ -862,6 +1455,8 @@ export const getAllApplicationSD_VN = async (req, res) => {
                 ndSuaNhan: () => rec.ndSuaNhan || null,
                 suaNhomSPDV: () => rec.suaNhomSPDV ?? null,
                 ndSuaNhomSPDV: () => rec.ndSuaNhomSPDV || null,
+                suaDoiNoiDungKhac: () => rec.suaDoiNoiDungKhac ?? null,
+                ndSuaDoiNoiDungKhac: () => rec.ndSuaDoiNoiDungKhac || null,
             };
 
             const row = {
@@ -871,16 +1466,27 @@ export const getAllApplicationSD_VN = async (req, res) => {
                 maDonDangKyGoc: rec.maDonDangKyGoc,
                 soDonGoc: donGocObj?.soDon || null,
                 ngayNopDonGoc: donGocObj?.ngayNopDon || null,
-                soDonSD: rec.soDon,
+                soDonSD: effectiveSoDonSD,
                 ngayYeuCau: rec.ngayYeuCau,
                 lanSuaDoi: rec.lanSuaDoi,
-                ngayGhiNhanSuaDoi: rec.ngayGhiNhanSuaDoi,
+                ngayGhiNhanSuaDoi: isApproved ? rec.ngayGhiNhanSuaDoi : null,
                 duocGhiNhanSuaDoi: rec.duocGhiNhanSuaDoi,
                 moTa: rec.moTa,
                 trangThaiDuyet: rec.trangThaiDuyet,
                 ngayChapThuan: rec.ngayChapThuan,
                 ngayTuChoi: rec.ngayTuChoi,
                 lyDoTuChoi: rec.lyDoTuChoi,
+                hanTraLoi: rec.hanTraLoi || null,
+                tuDongTuChoi: Boolean(rec.tuDongTuChoi),
+                soLanThongBaoCuc: Number(phanHoiStat?.soLan) || 0,
+                dangChoTraLoiCuc: (Number(phanHoiStat?.chuaTraLoi) || 0) > 0,
+                loaiDonGoc: loaiDonGocMap.get(rec.id) ?? null,
+                suaDoiDaiDien: Boolean(rec.suaDoiDaiDien),
+                suaDoiTenChuDon: Boolean(rec.suaDoiTenChuDon),
+                suaDoiDiaChi: Boolean(rec.suaDoiDiaChi),
+                suaNhan: Boolean(rec.suaNhan),
+                suaNhomSPDV: Boolean(rec.suaNhomSPDV),
+                suaDoiNoiDungKhac: Boolean(rec.suaDoiNoiDungKhac),
                 duLieuThayDoi: rec.duLieuThayDoi,
                 donMoi: rec.donMoi || null,
                 donCha: donGocObj

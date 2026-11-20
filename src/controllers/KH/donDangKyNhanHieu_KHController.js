@@ -18,8 +18,11 @@ import { DoiTac } from "../../models/doiTacModel.js";
 import { GCN_NH_KH } from "../../models/GCN_NH_KHModel.js";
 import { GiayUyQuyen } from "../../models/GiayUyQuyenModel.js";
 import { DonSuaDoi_NH_KH } from "../../models/KH_SuaDoi_NH/donSuaDoiNH_KHModel.js";
+import { DonCQSH_KH } from "../../models/KH_ChuyenQuyenSH/donCQSH_KHModel.js";
 import { DonTachNH_KH } from "../../models/index.js";
 import { resolveGCNDatesForSave } from "../../utils/gcnDateHelper.js";
+import { autoRejectExpiredDonSuaDoi_KH, getDonKHLineageGraph } from "./donSuaDoi_NH_KHController.js";
+import { autoRejectExpiredDonCQSH_KH } from "./donCQSH_NH_KHController.js";
 const tinhHanXuLy = (app) => {
     let duKienDate = null;
 
@@ -107,10 +110,30 @@ export const getAllApplication_KH = async (req, res) => {
 
         const whereCondition = {};
 
+        await Promise.all([autoRejectExpiredDonSuaDoi_KH(), autoRejectExpiredDonCQSH_KH()]);
+
         if (maNhanHieu) whereCondition.maNhanHieu = maNhanHieu;
         if (trangThaiDon) whereCondition.trangThaiDon = trangThaiDon;
         if (trangThaiVuViec) whereCondition.trangThaiVuViec = trangThaiVuViec; // ✅
-        if (loaiDon) whereCondition.loaiDon = loaiDon;                         // ✅
+        if (loaiDon === "DANG_SUA_DOI") {
+            const pendingSD = await DonSuaDoi_NH_KH.findAll({
+                where: { trangThaiDuyet: 0 },
+                attributes: ["maDonDangKyGoc"],
+                raw: true,
+            });
+            const ids = [...new Set(pendingSD.map((x) => x.maDonDangKyGoc).filter(Boolean))];
+            whereCondition.maDonDangKy = { [Op.in]: ids.length ? ids : ["__NONE__"] };
+        } else if (loaiDon === "DANG_CHUYEN_QUYEN") {
+            const pendingCQ = await DonCQSH_KH.findAll({
+                where: { trangThaiDuyet: 0 },
+                attributes: ["maDonDangKyGoc"],
+                raw: true,
+            });
+            const ids = [...new Set(pendingCQ.map((x) => x.maDonDangKyGoc).filter(Boolean))];
+            whereCondition.maDonDangKy = { [Op.in]: ids.length ? ids : ["__NONE__"] };
+        } else if (loaiDon) {
+            whereCondition.loaiDon = loaiDon;
+        }
         if (maNguoiXuLy1) whereCondition.maNguoiXuLy1 = maNguoiXuLy1;
         if (trangThaiTaiLieu) {
             if (Number(trangThaiTaiLieu) === 1) {
@@ -362,20 +385,33 @@ export const getAllApplication_KH = async (req, res) => {
             trangThaiVuViec: (app) => app.trangThaiVuViec,
             linkAnh: (app) => app.nhanHieu?.linkAnh || null,
             donGoc: (app) => app.donGoc,
+            laDonTiepNhan: (app) => Boolean(app.laDonTiepNhan),
         };
 
         const maDonIds = applications.map((app) => app.maDonDangKy).filter(Boolean);
         let pendingSuaDoiSet = new Set();
+        let pendingChuyenQuyenSet = new Set();
         if (maDonIds.length > 0) {
-            const pendingSDs = await DonSuaDoi_NH_KH.findAll({
-                where: {
-                    maDonDangKyGoc: { [Op.in]: maDonIds },
-                    duocGhiNhanSuaDoi: { [Op.not]: true },
-                },
-                attributes: ["maDonDangKyGoc"],
-                raw: true,
-            });
+            const [pendingSDs, pendingCQs] = await Promise.all([
+                DonSuaDoi_NH_KH.findAll({
+                    where: {
+                        maDonDangKyGoc: { [Op.in]: maDonIds },
+                        trangThaiDuyet: 0,
+                    },
+                    attributes: ["maDonDangKyGoc"],
+                    raw: true,
+                }),
+                DonCQSH_KH.findAll({
+                    where: {
+                        maDonDangKyGoc: { [Op.in]: maDonIds },
+                        trangThaiDuyet: 0,
+                    },
+                    attributes: ["maDonDangKyGoc"],
+                    raw: true,
+                }),
+            ]);
             pendingSuaDoiSet = new Set(pendingSDs.map((sd) => sd.maDonDangKyGoc));
+            pendingChuyenQuyenSet = new Set(pendingCQs.map((cq) => cq.maDonDangKyGoc));
         }
 
         const result = applications.map((app) => {
@@ -387,11 +423,13 @@ export const getAllApplication_KH = async (req, res) => {
             });
 
             row.loaiDon = app.loaiDon ?? 1;
-            row.donGoc = app.donGoc;
+            row.donGoc = app.donGoc ?? 0;
+            row.laDonTiepNhan = Boolean(app.laDonTiepNhan);
             row.tinhTrangDon = app.trangThaiDon;
             row.trangThaiDon = app.trangThaiDon;
             row.trangThaiVuViec = app.trangThaiVuViec;
             row.dangSuaDoi = pendingSuaDoiSet.has(app.maDonDangKy);
+            row.dangChuyenQuyen = pendingChuyenQuyenSet.has(app.maDonDangKy);
 
             return row;
         });
@@ -458,30 +496,34 @@ export const getApplicationById_KH = async (req, res) => {
 
         const plainDon = don.toJSON();
 
-        // lấy thông tin VuViec bằng maHoSo
-        const vuViecs = await VuViec.findAll({
-            where: { maHoSo: plainDon.maHoSo },
-            attributes: [
-                "id",
-                "maHoSo",
-                "tenVuViec",
-                "soDon",
-                "idKhachHang",
-                "ngayTaoVV",
-                "deadline",
-                "softDeadline",
-                "soTien",
-                "xuatBill",
-                "isMainCase",
-                "maNguoiXuLy"
-            ],
-            order: [["createdAt", "DESC"]] // hoặc ASC nếu muốn tăng dần
-        });
-
-
-        // gắn vào kết quả trả về (dạng mảng)
-        plainDon.vuViec = vuViecs.map(v => v.toJSON());
-        plainDon.maSPDVList = plainDon.DonDK_SPDV_KH.map(sp => sp.maSPDV);
+        // lấy thông tin VuViec bằng maHoSo (guard null cho đơn tiếp nhận)
+        if (plainDon.maHoSo) {
+            const vuViecs = await VuViec.findAll({
+                where: { maHoSo: plainDon.maHoSo },
+                attributes: [
+                    "id",
+                    "maHoSo",
+                    "tenVuViec",
+                    "soDon",
+                    "idKhachHang",
+                    "ngayTaoVV",
+                    "deadline",
+                    "softDeadline",
+                    "soTien",
+                    "xuatBill",
+                    "isMainCase",
+                    "maNguoiXuLy"
+                ],
+                order: [["createdAt", "DESC"]]
+            });
+            plainDon.vuViec = vuViecs.map(v => v.toJSON());
+        } else {
+            plainDon.vuViec = [];
+        }
+        plainDon.laDonTiepNhan = Boolean(plainDon.laDonTiepNhan);
+        plainDon.maSPDVList = Array.isArray(plainDon.DonDK_SPDV_KH)
+            ? plainDon.DonDK_SPDV_KH.map(sp => sp.maSPDV)
+            : [];
         delete plainDon.DonDK_SPDV_KH;
         if (plainDon.loaiDon === 2) {
             const donSuaDoi = await DonSuaDoi_NH_KH.findOne({
@@ -500,55 +542,142 @@ export const getApplicationById_KH = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
-const generateMaDonDangKy = (maHoSo) => {
-    // Tạo chuỗi random 6 ký tự (có thể chỉnh độ dài)
+const generateMaDonDangKy = (prefix) => {
+    const safePrefix = prefix && String(prefix).trim() !== "" ? String(prefix).trim() : "TN_KH";
     const randomStr = crypto.randomBytes(3).toString("hex");
-    return `${maHoSo}_${randomStr}`;
+    return `${safePrefix}_${randomStr}`;
 };
+
 export const createApplication_KH = async (req, res) => {
     const transaction = await DonDangKyNhanHieu_KH.sequelize.transaction();
     try {
-        const { nhanHieu, taiLieus, vuViecs, maHoSo, maHoSoVuViec, lichSuThamDinh, maSPDVList, maNguoiXuLy1, maNguoiXuLy2, maNhanSuCapNhap, ...donData } = req.body;
-        const maDonDangKy = generateMaDonDangKy(maHoSo);
-        if (!donData.maNhanHieu) {
-            if (!nhanHieu?.tenNhanHieu) {
-                throw new Error("Vui lòng điền tên nhãn hiệu");
+        const {
+            nhanHieu,
+            taiLieus,
+            vuViecs,
+            maHoSo,
+            maHoSoVuViec,
+            laDonTiepNhan = false,
+            lichSuThamDinh,
+            maSPDVList,
+            maNguoiXuLy1,
+            maNguoiXuLy2,
+            maNhanSuCapNhap,
+            ...donData
+        } = req.body;
+
+        const isDonTiepNhan = Boolean(laDonTiepNhan);
+        const rawHoSo = maHoSo !== undefined && maHoSo !== null && String(maHoSo).trim() !== ""
+            ? maHoSo
+            : maHoSoVuViec;
+        const cleanMaHoSo = rawHoSo && String(rawHoSo).trim() !== "" ? String(rawHoSo).trim() : null;
+        const cleanIdKhachHang =
+            donData.idKhachHang !== undefined &&
+            donData.idKhachHang !== null &&
+            String(donData.idKhachHang).trim() !== ""
+                ? Number(donData.idKhachHang)
+                : null;
+        const cleanIdDoiTac =
+            donData.idDoiTac !== undefined &&
+            donData.idDoiTac !== null &&
+            String(donData.idDoiTac).trim() !== ""
+                ? Number(donData.idDoiTac)
+                : null;
+        const cleanIdGUQ =
+            donData.idGUQ !== undefined &&
+            donData.idGUQ !== null &&
+            String(donData.idGUQ).trim() !== ""
+                ? Number(donData.idGUQ)
+                : null;
+        const cleanSoDon = donData.soDon && String(donData.soDon).trim() !== "" ? String(donData.soDon).trim() : null;
+
+        const hasMaNhanHieu =
+            donData.maNhanHieu !== undefined &&
+            donData.maNhanHieu !== null &&
+            String(donData.maNhanHieu).trim() !== "";
+        const hasTenNhanHieu = Boolean(nhanHieu?.tenNhanHieu && String(nhanHieu.tenNhanHieu).trim() !== "");
+
+        // Validate theo 2 chế độ (tương đồng với VN)
+        if (isDonTiepNhan) {
+            const missingFields = [];
+            if (!cleanSoDon) missingFields.push("số đơn (soDon)");
+            if (
+                donData.trangThaiVuViec === undefined ||
+                donData.trangThaiVuViec === null ||
+                String(donData.trangThaiVuViec).trim() === ""
+            ) {
+                missingFields.push("trạng thái vụ việc (trangThaiVuViec)");
+            }
+            if (!Array.isArray(maSPDVList) || maSPDVList.length === 0) {
+                missingFields.push("nhóm sản phẩm/dịch vụ (maSPDVList)");
+            }
+            if (!hasMaNhanHieu && !hasTenNhanHieu) {
+                missingFields.push("tên hoặc mã nhãn hiệu (tenNhanHieu / maNhanHieu)");
+            }
+            if (missingFields.length > 0) {
+                await transaction.rollback();
+                return res.status(400).json({
+                    message: `Đơn tiếp nhận KH thiếu thông tin bắt buộc: ${missingFields.join(", ")}.`,
+                });
+            }
+        } else {
+            if (!cleanMaHoSo) {
+                await transaction.rollback();
+                return res.status(400).json({ message: "Vui lòng nhập mã hồ sơ (maHoSo)." });
+            }
+        }
+
+        const sanitizedSoDon = cleanSoDon ? cleanSoDon.replace(/[^a-zA-Z0-9]/g, "") : "";
+        const maDonPrefix = cleanMaHoSo || (sanitizedSoDon ? `TN_KH_${sanitizedSoDon}` : "TN_KH");
+        const maDonDangKy = generateMaDonDangKy(maDonPrefix);
+
+        if (!hasMaNhanHieu) {
+            if (!hasTenNhanHieu) {
+                await transaction.rollback();
+                return res.status(400).json({ message: "Vui lòng điền tên nhãn hiệu" });
             }
 
-            const createdNhanHieu = await NhanHieu.create({
-                tenNhanHieu: nhanHieu.tenNhanHieu,
-                linkAnh: nhanHieu.linkAnh || null
-            }, { transaction });
+            const createdNhanHieu = await NhanHieu.create(
+                {
+                    tenNhanHieu: String(nhanHieu.tenNhanHieu).trim(),
+                    linkAnh: nhanHieu.linkAnh || null,
+                },
+                { transaction }
+            );
 
             donData.maNhanHieu = createdNhanHieu.maNhanHieu;
         }
 
         if (donData.giayUyQuyenGoc === false && !donData.maUyQuyen) {
-            return res.status(400).json({ message: "Vui lòng chọn gốc cảu giấy ủy quyền." });
+            await transaction.rollback();
+            return res.status(400).json({ message: "Vui lòng chọn gốc của giấy ủy quyền." });
         }
 
         if (donData.giayUyQuyenGoc === true) {
             donData.maUyQuyen = null;
         }
-        const newDon = await DonDangKyNhanHieu_KH.create({
-            ...donData,
-            loaiDon: donData.loaiDon || 1,
-            maDonDangKy: maDonDangKy,
-            maHoSoVuViec: maHoSo,
-            maHoSo: maHoSo,
-            maNguoiXuLy1: maNguoiXuLy1,
-            maNguoiXuLy2: maNguoiXuLy2,
-        }, { transaction });
+
+        const newDon = await DonDangKyNhanHieu_KH.create(
+            {
+                ...donData,
+                loaiDon: donData.loaiDon || 1,
+                maDonDangKy,
+                soDon: cleanSoDon,
+                maHoSoVuViec: cleanMaHoSo,
+                maHoSo: cleanMaHoSo,
+                idKhachHang: cleanIdKhachHang,
+                idDoiTac: cleanIdDoiTac,
+                idGUQ: cleanIdGUQ,
+                laDonTiepNhan: isDonTiepNhan,
+                maNguoiXuLy1: maNguoiXuLy1 || null,
+                maNguoiXuLy2: maNguoiXuLy2 || null,
+                maNhanSuCapNhap: req.user?.maNhanSu || maNhanSuCapNhap || donData.maNhanSuCapNhap || null,
+            },
+            { transaction }
+        );
         let idGCN_NH = null;
-        if (
-            donData.soBang
-            // ||
-            // donData.quyetDinhSo ||
-            // donData.ngayCapBang ||
-            // donData.ngayHetHanBang ||
-            // donData.ngayGuiBangChoKhachHang
-        ) {
-            const actualMaHoSo = maHoSo || donData.maHoSoVuViec || newDon.maHoSo || newDon.maHoSoVuViec || null;
+        if (donData.soBang) {
+            const actualMaHoSo = cleanMaHoSo || newDon.maHoSo || newDon.maHoSoVuViec || null;
             const effectiveNgayNopDon = newDon.ngayNopDon || donData.ngayNopDon || null;
             const resolvedGCNDates = resolveGCNDatesForSave({
                 ngayNopDon: effectiveNgayNopDon,
@@ -564,31 +693,27 @@ export const createApplication_KH = async (req, res) => {
                 ngayHetHanBang: resolvedGCNDates.ngayHetHanBang,
                 hanGiaHan: resolvedGCNDates.hanGiaHan,
                 ngayGuiBangChoKhachHang: donData.ngayGuiBangChoKhachHang || null,
-                idKhachHang: donData.idKhachHang || null,
-                idDoiTac: donData.idDoiTac || null,
+                idKhachHang: cleanIdKhachHang,
+                idDoiTac: cleanIdDoiTac,
                 maHoSo: actualMaHoSo,
-                soDon: newDon.soDon || donData.soDon || null,
+                soDon: newDon.soDon || cleanSoDon,
                 clientsRef: donData.clientsRef || null,
-                maNhanHieu: donData.maNhanHieu,
+                maNhanHieu: donData.maNhanHieu || null,
                 maQuocGia: "KH",
                 trangThaiDon: donData.trangThaiDon || null,
             };
-
-            console.log("👉 Tạo mới GCN_NH với dữ liệu:", gcnData);
 
             const newGCN = await GCN_NH_KH.create(gcnData, { transaction });
             idGCN_NH = newGCN.id
                 ?? newGCN.dataValues?.id
                 ?? newGCN.getDataValue('id');
-
         }
 
-        // ✅ Update lại DonDangKy để gán idGCN_NH
         if (idGCN_NH) {
             await newDon.update({ idGCN_NH }, { transaction });
         }
-        if (donData.idGUQ) {
-            const guq = await GiayUyQuyen.findByPk(donData.idGUQ, { transaction });
+        if (cleanIdGUQ) {
+            const guq = await GiayUyQuyen.findByPk(cleanIdGUQ, { transaction });
 
             if (guq) {
                 const isEmptySoDonGoc =
@@ -596,9 +721,9 @@ export const createApplication_KH = async (req, res) => {
                     guq.soDonGoc === undefined ||
                     (typeof guq.soDonGoc === "string" && guq.soDonGoc.trim() === "");
 
-                if (isEmptySoDonGoc && donData.soDon) {
+                if (isEmptySoDonGoc && cleanSoDon) {
                     await guq.update(
-                        { soDonGoc: donData.soDon },
+                        { soDonGoc: cleanSoDon },
                         { transaction }
                     );
                 }
@@ -614,39 +739,40 @@ export const createApplication_KH = async (req, res) => {
                 }, { transaction });
             }
         }
-        for (const vuViec of vuViecs) {
-            let ngayXuatBill = null;
-            let maNguoiXuatBill = null;
-            if (vuViec.xuatBill === true) {
-                ngayXuatBill = new Date();
-                maNguoiXuatBill = maNhanSuCapNhap
+        if (Array.isArray(vuViecs) && vuViecs.length > 0 && cleanMaHoSo && cleanIdKhachHang) {
+            for (const vuViec of vuViecs) {
+                let ngayXuatBill = null;
+                let maNguoiXuatBill = null;
+                if (vuViec.xuatBill === true) {
+                    ngayXuatBill = new Date();
+                    maNguoiXuatBill = maNhanSuCapNhap;
+                }
+                await VuViec.create(
+                    {
+                        tenVuViec: vuViec.tenVuViec,
+                        moTa: vuViec.moTa,
+                        trangThai: vuViec.trangThai,
+                        maHoSo: cleanMaHoSo,
+                        maDon: maDonDangKy,
+                        soDon: cleanSoDon,
+                        idKhachHang: cleanIdKhachHang,
+                        idDoiTac: cleanIdDoiTac,
+                        maQuocGiaVuViec: "KH",
+                        ngayTaoVV: new Date(),
+                        maNguoiXuLy: vuViec.maNguoiXuLy,
+                        clientsRef: donData.clientsRef,
+                        tenBang: "DonDangKyNhanHieu",
+                        deadline: vuViec.deadline,
+                        softDeadline: vuViec.softDeadline,
+                        xuatBill: vuViec.xuatBill,
+                        ngayXuatBill,
+                        maNguoiXuatBill,
+                        soTien: vuViec.soTien,
+                        isMainCase: vuViec.isMainCase,
+                    },
+                    { transaction }
+                );
             }
-            await VuViec.create(
-                {
-                    tenVuViec: vuViec.tenVuViec,
-                    moTa: vuViec.moTa,
-                    trangThai: vuViec.trangThai,
-                    maHoSo: maHoSo,
-                    maDon: maDonDangKy,
-                    soDon: donData.soDon,
-                    idKhachHang: donData.idKhachHang,
-                    idDoiTac: donData.idDoiTac,
-                    maQuocGiaVuViec: "KH",
-                    ngayTaoVV: new Date(),
-                    maNguoiXuLy: vuViec.maNguoiXuLy,
-                    clientsRef: donData.clientsRef,
-                    tenBang: "DonDangKyNhanHieu",
-                    deadline: vuViec.deadline,
-                    softDeadline: vuViec.softDeadline,
-                    xuatBill: vuViec.xuatBill,
-                    ngayXuatBill: ngayXuatBill,
-                    maNguoiXuatBill: maNguoiXuatBill,
-                    soTien: vuViec.soTien,
-                    isMainCase: vuViec.isMainCase,
-                },
-                { transaction }
-            );
-
         }
         if (Array.isArray(maSPDVList)) {
             for (const maSPDV of maSPDVList) {
@@ -720,19 +846,49 @@ export const createApplication_KH = async (req, res) => {
 export const updateApplication_KH = async (req, res) => {
     const t = await DonDangKyNhanHieu_KH.sequelize.transaction();
     try {
-        const { maDonDangKy, maHoSo, taiLieus, vuViecs, maSPDVList, lichSuThamDinh, maNhanHieu, maNhanSuCapNhap, nhanHieu, maNguoiXuLy1, maNguoiXuLy2, donSuaDoi, donTach, donData, ...updateData } = req.body;
+        const { maDonDangKy, maHoSo, laDonTiepNhan, taiLieus, vuViecs, maSPDVList, lichSuThamDinh, maNhanHieu, maNhanSuCapNhap, nhanHieu, maNguoiXuLy1, maNguoiXuLy2, donSuaDoi, donTach, donData, ...updateData } = req.body;
 
         if (!maDonDangKy) {
+            await t.rollback();
             return res.status(400).json({ message: "Thiếu mã đơn đăng ký" });
         }
 
         const don = await DonDangKyNhanHieu_KH.findOne({
-            where: { maDonDangKy }
+            where: { maDonDangKy },
+            transaction: t,
         });
 
         if (!don) {
+            await t.rollback();
             return res.status(404).json({ message: "Không tìm thấy đơn đăng ký ....." });
         }
+
+        if (maHoSo !== undefined) {
+            const cleanMaHoSo = maHoSo && String(maHoSo).trim() !== "" ? String(maHoSo).trim() : null;
+            updateData.maHoSo = cleanMaHoSo;
+            updateData.maHoSoVuViec = cleanMaHoSo;
+        } else if (updateData.maHoSoVuViec !== undefined) {
+            updateData.maHoSoVuViec =
+                updateData.maHoSoVuViec && String(updateData.maHoSoVuViec).trim() !== ""
+                    ? String(updateData.maHoSoVuViec).trim()
+                    : null;
+        }
+        if (updateData.idKhachHang !== undefined) {
+            updateData.idKhachHang =
+                updateData.idKhachHang !== null && String(updateData.idKhachHang).trim() !== ""
+                    ? Number(updateData.idKhachHang)
+                    : null;
+        }
+        if (updateData.idDoiTac !== undefined) {
+            updateData.idDoiTac =
+                updateData.idDoiTac !== null && String(updateData.idDoiTac).trim() !== ""
+                    ? Number(updateData.idDoiTac)
+                    : null;
+        }
+        if (laDonTiepNhan !== undefined) {
+            updateData.laDonTiepNhan = Boolean(laDonTiepNhan);
+        }
+
         const changedFields = [];
         if (maNhanSuCapNhap) {
             updateData.maNhanSuCapNhap = maNhanSuCapNhap;
@@ -758,16 +914,11 @@ export const updateApplication_KH = async (req, res) => {
                 await nhanHieuInstance.save({ transaction: t });
             }
         }
-        // Kiểm tra logic giấy ủy quyền gốc và mã ủy quyền
-        // if (updateData.giayUyQuyenGoc === false && !updateData.maUyQuyen) {
-        //     return res.status(400).json({ message: "Vui lòng chọn giấy ủy quyền khi không phải là bản gốc." });
-        // }
-
-        // if (updateData.giayUyQuyenGoc === true) {
-        //     updateData.maUyQuyen = null; // reset nếu là bản gốc
-        // }
-        console.log("Mã người xử lý 1:", maNguoiXuLy1)
-        await don.update({ ...updateData, maNhanHieu, maNguoiXuLy1, maNguoiXuLy2 }, { transaction: t });
+        const updatePayload = { ...updateData };
+        if (maNhanHieu !== undefined) updatePayload.maNhanHieu = maNhanHieu;
+        if (maNguoiXuLy1 !== undefined) updatePayload.maNguoiXuLy1 = maNguoiXuLy1 || null;
+        if (maNguoiXuLy2 !== undefined) updatePayload.maNguoiXuLy2 = maNguoiXuLy2 || null;
+        await don.update(updatePayload, { transaction: t });
         let idGCN_NH = null;
 
         if (
@@ -892,14 +1043,15 @@ export const updateApplication_KH = async (req, res) => {
         }
 
         // ==================== Đồng bộ Vụ Việc ====================
-        if (Array.isArray(vuViecs)) {
+        const effectiveMaHoSoForVV = don.maHoSo || (maHoSo && String(maHoSo).trim() !== "" ? String(maHoSo).trim() : null);
+        if (Array.isArray(vuViecs) && effectiveMaHoSoForVV) {
             const vuViecsHienTai = await VuViec.findAll({
-                where: { maHoSo },
+                where: { maHoSo: effectiveMaHoSoForVV },
                 transaction: t
             });
 
             const idVuViecsTruyenLen = vuViecs
-                .filter(vv => vv.id) // hoặc vv.maVuViec tuỳ bạn chuẩn hoá
+                .filter(vv => vv.id)
                 .map(vv => vv.id);
 
             // Xoá vụ việc không còn trong request
@@ -911,6 +1063,7 @@ export const updateApplication_KH = async (req, res) => {
 
             // Thêm mới hoặc cập nhật vụ việc
             for (const vuViec of vuViecs) {
+                if (!don.idKhachHang) continue;
                 let ngayXuatBill = null;
                 let maNguoiXuatBill = null;
                 if (vuViec.xuatBill === true) {
@@ -918,17 +1071,16 @@ export const updateApplication_KH = async (req, res) => {
                     maNguoiXuatBill = maNhanSuCapNhap
                 }
                 if (vuViec.id) {
-                    // ✅ chỉ update các field có thể thay đổi
                     await VuViec.update(
                         {
                             tenVuViec: vuViec.tenVuViec,
                             moTa: vuViec.moTa,
                             trangThai: vuViec.trangThai,
-                            maHoSo: maHoSo,
+                            maHoSo: effectiveMaHoSoForVV,
                             maDon: maDonDangKy,
                             soDon: don.soDon,
                             idKhachHang: don.idKhachHang,
-                            idDoiTac: updateData.idDoiTac,
+                            idDoiTac: don.idDoiTac,
                             maQuocGiaVuViec: "KH",
                             ngayTaoVV: new Date(),
                             maNguoiXuLy: vuViec.maNguoiXuLy,
@@ -948,17 +1100,16 @@ export const updateApplication_KH = async (req, res) => {
                         }
                     );
                 } else {
-                    // ✅ create thì set đầy đủ
                     await VuViec.create(
                         {
                             tenVuViec: vuViec.tenVuViec,
                             moTa: vuViec.moTa,
                             trangThai: vuViec.trangThai,
-                            maHoSo: maHoSo,
+                            maHoSo: effectiveMaHoSoForVV,
                             maDon: maDonDangKy,
                             soDon: don.soDon,
                             idKhachHang: don.idKhachHang,
-                            idDoiTac: updateData.idDoiTac,
+                            idDoiTac: don.idDoiTac,
                             maQuocGiaVuViec: "KH",
                             ngayTaoVV: new Date(),
                             maNguoiXuLy: vuViec.maNguoiXuLy,
@@ -1061,33 +1212,32 @@ export const updateApplication_KH = async (req, res) => {
 
             }
         }
-        if (donSuaDoi) {
+        // Chỉ cập nhật DonSuaDoi_NH_KH nếu client chủ động gửi object donSuaDoi có id (không ghi đè/xóa khi undefined/null)
+        if (donSuaDoi && typeof donSuaDoi === "object" && donSuaDoi.id) {
             const ds = donSuaDoi;
-            if (ds.id) {
-
-                const existingDS = await DonSuaDoi_NH_KH.findByPk(ds.id, { transaction: t });
-                if (existingDS) {
-                    await existingDS.update({
-                        soDon: ds.soDon || existingDS.soDon,
-                        ngayYeuCau: ds.ngayYeuCau || existingDS.ngayYeuCau,
-                        lanSuaDoi: ds.lanSuaDoi ?? existingDS.lanSuaDoi,
-                        ngayGhiNhanSuaDoi: ds.ngayGhiNhanSuaDoi || existingDS.ngayGhiNhanSuaDoi,
-                        duocGhiNhanSuaDoi: ds.duocGhiNhanSuaDoi ?? existingDS.duocGhiNhanSuaDoi,
-                        moTa: ds.moTa || existingDS.moTa,
-                        suaDoiDaiDien: ds.suaDoiDaiDien ?? existingDS.suaDoiDaiDien,
-                        ndSuaDoiDaiDien: ds.ndSuaDoiDaiDien || existingDS.ndSuaDoiDaiDien,
-                        suaDoiTenChuDon: ds.suaDoiTenChuDon ?? existingDS.suaDoiTenChuDon,
-                        ndSuaDoiTenChuDon: ds.ndSuaDoiTenChuDon || existingDS.ndSuaDoiTenChuDon,
-                        suaDoiDiaChi: ds.suaDoiDiaChi ?? existingDS.suaDoiDiaChi,
-                        ndSuaDoiDiaChi: ds.ndSuaDoiDiaChi || existingDS.ndSuaDoiDiaChi,
-                        suaNhan: ds.suaNhan ?? existingDS.suaNhan,
-                        ndSuaNhan: ds.ndSuaNhan || existingDS.ndSuaNhan,
-                        suaNhomSPDV: ds.suaNhomSPDV ?? existingDS.suaNhomSPDV,
-                        ndSuaNhomSPDV: ds.ndSuaNhomSPDV || existingDS.ndSuaNhomSPDV,
-                        suaDoiNoiDungKhac: ds.suaDoiNoiDungKhac ?? existingDS.suaDoiNoiDungKhac,
-                        maNhanSuCapNhap: maNhanSuCapNhap || existingDS.maNhanSuCapNhap
-                    }, { transaction: t });
-                }
+            const existingDS = await DonSuaDoi_NH_KH.findByPk(ds.id, { transaction: t });
+            if (existingDS) {
+                await existingDS.update({
+                    soDon: ds.soDon ?? existingDS.soDon,
+                    ngayYeuCau: ds.ngayYeuCau ?? existingDS.ngayYeuCau,
+                    lanSuaDoi: ds.lanSuaDoi ?? existingDS.lanSuaDoi,
+                    ngayGhiNhanSuaDoi: Number(existingDS.trangThaiDuyet) === 1 ? (ds.ngayGhiNhanSuaDoi ?? existingDS.ngayGhiNhanSuaDoi) : null,
+                    duocGhiNhanSuaDoi: ds.duocGhiNhanSuaDoi ?? existingDS.duocGhiNhanSuaDoi,
+                    moTa: ds.moTa ?? existingDS.moTa,
+                    suaDoiDaiDien: ds.suaDoiDaiDien ?? existingDS.suaDoiDaiDien,
+                    ndSuaDoiDaiDien: ds.ndSuaDoiDaiDien ?? existingDS.ndSuaDoiDaiDien,
+                    suaDoiTenChuDon: ds.suaDoiTenChuDon ?? existingDS.suaDoiTenChuDon,
+                    ndSuaDoiTenChuDon: ds.ndSuaDoiTenChuDon ?? existingDS.ndSuaDoiTenChuDon,
+                    suaDoiDiaChi: ds.suaDoiDiaChi ?? existingDS.suaDoiDiaChi,
+                    ndSuaDoiDiaChi: ds.ndSuaDoiDiaChi ?? existingDS.ndSuaDoiDiaChi,
+                    suaNhan: ds.suaNhan ?? existingDS.suaNhan,
+                    ndSuaNhan: ds.ndSuaNhan ?? existingDS.ndSuaNhan,
+                    suaNhomSPDV: ds.suaNhomSPDV ?? existingDS.suaNhomSPDV,
+                    ndSuaNhomSPDV: ds.ndSuaNhomSPDV ?? existingDS.ndSuaNhomSPDV,
+                    suaDoiNoiDungKhac: ds.suaDoiNoiDungKhac ?? existingDS.suaDoiNoiDungKhac,
+                    ndSuaDoiNoiDungKhac: ds.ndSuaDoiNoiDungKhac ?? existingDS.ndSuaDoiNoiDungKhac,
+                    maNhanSuCapNhap: maNhanSuCapNhap || existingDS.maNhanSuCapNhap
+                }, { transaction: t });
             }
         }
         if (donTach) {
@@ -1182,21 +1332,25 @@ export const getFullApplicationDetail_KH = async (req, res) => {
                 {
                     model: TaiLieu_KH,
                     as: "taiLieuChuaNop_KH",
+                    required: false,
                     attributes: ["maTaiLieu", "tenTaiLieu", "linkTaiLieu", "trangThai"]
                 },
                 {
                     model: DonDK_SPDV_KH,
                     as: "DonDK_SPDV_KH",
+                    required: false,
                     attributes: ["maSPDV"]
                 },
                 {
                     model: NhanHieu,
                     as: "nhanHieu",
+                    required: false,
                     attributes: ["maNhanHieu", "tenNhanHieu", "linkAnh"]
                 },
                 {
                     model: LichSuThamDinh_KH,
                     as: "lichSuThamDinh",
+                    required: false,
                     attributes: {
                         exclude: ['createdAt', 'updatedAt']
                     }
@@ -1204,11 +1358,19 @@ export const getFullApplicationDetail_KH = async (req, res) => {
                 {
                     model: KhachHangCuoi,
                     as: "khachHang",
+                    required: false,
                     attributes: ["id", "maKhachHang", "tenKhachHang", "diaChi", "sdt"]
+                },
+                {
+                    model: DoiTac,
+                    as: "doitac",
+                    required: false,
+                    attributes: ["id", "maDoiTac", "tenDoiTac", "diaChi", "sdt", "email"]
                 },
                 {
                     model: GiayUyQuyen,
                     as: "GiayUyQuyen",
+                    required: false,
                     attributes: ["id", "soDonGoc", "soGUQ"],
                 }
             ]
@@ -1266,54 +1428,247 @@ export const getFullApplicationDetail_KH = async (req, res) => {
             : [];
         delete plainDon.DonDK_SPDV_KH;
 
-        // ====== PHẦN ĐƠN SỬA ĐỔI (KH) ======
+        // ====== PHẦN ĐƠN SỬA ĐỔI, CHUYỂN QUYỀN & PHẢ HỆ (KH) ======
+        await Promise.all([autoRejectExpiredDonSuaDoi_KH(), autoRejectExpiredDonCQSH_KH()]);
 
-        // 1. Đơn sửa đổi của chính đơn KH hiện tại (nếu là loại đơn sửa đổi)
-        if (plainDon.loaiDon === 2) {
-            const donSuaDoiHienTai = await DonSuaDoi_NH_KH.findOne({
-                where: { maDonDangKy: plainDon.maDonDangKy },
+        plainDon.laDonTiepNhan = Boolean(plainDon.laDonTiepNhan);
+        plainDon.donGoc = plainDon.donGoc ?? 0;
+
+        // 0. Phả hệ đơn cha của đơn hiện tại (Sửa đổi / Chuyển quyền / Tách đơn KH)
+        const graphKH = await getDonKHLineageGraph();
+        const parentEdge = graphKH.parentOf.get(plainDon.maDonDangKy) || null;
+        if (parentEdge?.parentMaDon) {
+            const parentDon = await DonDangKyNhanHieu_KH.findOne({
+                where: { maDonDangKy: parentEdge.parentMaDon },
+                attributes: ["maDonDangKy", "soDon", "ngayNopDon", "maHoSo", "maHoSoVuViec", "loaiDon"],
+                raw: true,
             });
-            if (donSuaDoiHienTai) {
-                plainDon.donSuaDoi = donSuaDoiHienTai.toJSON();
-            }
+            plainDon.maDonDangKyGoc = parentEdge.parentMaDon;
+            plainDon.soDonGoc = parentDon?.soDon || null;
+            plainDon.ngayNopDonGoc = parentDon?.ngayNopDon || null;
+            plainDon.loaiBienDongGoc = parentEdge.loaiBienDong || null;
+            plainDon.donCha = parentDon
+                ? {
+                      maDonDangKy: parentDon.maDonDangKy,
+                      soDon: parentDon.soDon,
+                      ngayNopDon: parentDon.ngayNopDon,
+                      loaiBienDong: parentEdge.loaiBienDong,
+                  }
+                : null;
+        } else {
+            plainDon.maDonDangKyGoc = null;
+            plainDon.soDonGoc = null;
+            plainDon.ngayNopDonGoc = null;
+            plainDon.loaiBienDongGoc = null;
+            plainDon.donCha = null;
         }
 
-        // 2. Danh sách các đơn sửa đổi của tất cả đơn trong cùng hồ sơ KH
+        // 1. Tờ khai sửa đổi & chuyển quyền của chính đơn KH hiện tại
+        const [donSuaDoiHienTai, donCQHienTai] = await Promise.all([
+            DonSuaDoi_NH_KH.findOne({
+                where: {
+                    [Op.or]: [
+                        { maDonDangKy: plainDon.maDonDangKy },
+                        { maDonDangKyGoc: plainDon.maDonDangKy, trangThaiDuyet: 0 },
+                    ],
+                },
+                order: [["id", "DESC"]],
+            }),
+            DonCQSH_KH.findOne({
+                where: {
+                    [Op.or]: [
+                        { maDonDangKy: plainDon.maDonDangKy },
+                        { maDonDangKyGoc: plainDon.maDonDangKy, trangThaiDuyet: 0 },
+                    ],
+                },
+                include: [
+                    {
+                        model: KhachHangCuoi,
+                        as: "khachHangMoi",
+                        required: false,
+                        attributes: ["id", "tenKhachHang", "maKhachHang", "diaChi", "sdt"],
+                    },
+                ],
+                order: [["id", "DESC"]],
+            }),
+        ]);
+        if (donSuaDoiHienTai) {
+            const sdPlain = donSuaDoiHienTai.toJSON();
+            sdPlain.ngayGhiNhanSuaDoi = Number(sdPlain.trangThaiDuyet) === 1 ? sdPlain.ngayGhiNhanSuaDoi : null;
+            plainDon.donSuaDoi = sdPlain;
+        }
+        if (donCQHienTai) {
+            const cqPlain = donCQHienTai.toJSON();
+            cqPlain.ngayGhiNhanCQ = Number(cqPlain.trangThaiDuyet) === 1 ? cqPlain.ngayGhiNhanCQ : null;
+            plainDon.donCQSH = cqPlain;
+        }
+
+        // 2. Biến động đang chờ duyệt (trangThaiDuyet = 0) của đơn hiện tại: gồm cả Sửa đổi + Chuyển quyền
+        const [pendingSuaDoiRows, pendingCQRows] = await Promise.all([
+            DonSuaDoi_NH_KH.findAll({
+                where: { maDonDangKyGoc: plainDon.maDonDangKy, trangThaiDuyet: 0 },
+                attributes: ["id", "soDon", "ngayYeuCau", "lanSuaDoi", "hanTraLoi"],
+                order: [["id", "DESC"]],
+                raw: true,
+            }),
+            DonCQSH_KH.findAll({
+                where: { maDonDangKyGoc: plainDon.maDonDangKy, trangThaiDuyet: 0 },
+                attributes: ["id", "soDon", "ngayYeuCau", "lanChuyenQuyen", "hanTraLoi"],
+                order: [["id", "DESC"]],
+                raw: true,
+            }),
+        ]);
+        plainDon.dsBienDongChoDuyet = [
+            ...pendingSuaDoiRows.map((sd) => ({
+                id: sd.id,
+                loaiBienDong: "SUA_DOI",
+                tenBienDong: "Đơn sửa đổi",
+                soDon: sd.soDon,
+                ngayYeuCau: sd.ngayYeuCau,
+                lanBienDong: sd.lanSuaDoi,
+                hanTraLoi: sd.hanTraLoi || null,
+            })),
+            ...pendingCQRows.map((cq) => ({
+                id: cq.id,
+                loaiBienDong: "CHUYEN_QUYEN",
+                tenBienDong: "Đơn chuyển quyền sở hữu",
+                soDon: cq.soDon,
+                ngayYeuCau: cq.ngayYeuCau,
+                lanBienDong: cq.lanChuyenQuyen,
+                hanTraLoi: cq.hanTraLoi || null,
+            })),
+        ];
+        plainDon.dangSuaDoi = pendingSuaDoiRows.length > 0;
+        plainDon.dangChuyenQuyen = pendingCQRows.length > 0;
+
+        // 3. Danh sách đơn con sau sửa đổi / chuyển quyền nếu đơn hiện tại đã đóng băng (donGoc = 1)
+        plainDon.dsDonCon = [];
+        if (Number(plainDon.donGoc) === 1) {
+            const [approvedSDChildren, approvedCQChildren] = await Promise.all([
+                DonSuaDoi_NH_KH.findAll({
+                    where: {
+                        maDonDangKyGoc: plainDon.maDonDangKy,
+                        trangThaiDuyet: 1,
+                        maDonDangKy: { [Op.and]: [{ [Op.not]: null }, { [Op.ne]: "" }] },
+                    },
+                    include: [
+                        {
+                            model: DonDangKyNhanHieu_KH,
+                            as: "donMoi",
+                            required: false,
+                            attributes: ["maDonDangKy", "soDon"],
+                        },
+                    ],
+                    order: [["id", "DESC"]],
+                }),
+                DonCQSH_KH.findAll({
+                    where: {
+                        maDonDangKyGoc: plainDon.maDonDangKy,
+                        trangThaiDuyet: 1,
+                        maDonDangKy: { [Op.and]: [{ [Op.not]: null }, { [Op.ne]: "" }] },
+                    },
+                    include: [
+                        {
+                            model: DonDangKyNhanHieu_KH,
+                            as: "donMoi",
+                            required: false,
+                            attributes: ["maDonDangKy", "soDon"],
+                        },
+                    ],
+                    order: [["id", "DESC"]],
+                }),
+            ]);
+            plainDon.dsDonCon = [
+                ...approvedSDChildren.map((c) => ({
+                    maDonDangKy: c.maDonDangKy,
+                    soDon: c.donMoi?.soDon || c.soDon || null,
+                    loaiBienDong: "Đơn sửa đổi",
+                })),
+                ...approvedCQChildren.map((c) => ({
+                    maDonDangKy: c.maDonDangKy,
+                    soDon: c.donMoi?.soDon || c.soDon || null,
+                    loaiBienDong: "Đơn chuyển quyền sở hữu",
+                })),
+            ];
+        }
+
+        // 4. Danh sách các đơn sửa đổi & chuyển quyền của tất cả đơn trong cùng hồ sơ KH (hoặc liên quan trực tiếp đơn này)
         plainDon.danhSachDonSuaDoi = [];
+        plainDon.danhSachDonChuyenQuyen = [];
+        let maDonListForScope = [plainDon.maDonDangKy];
         if (plainDon.maHoSo) {
-            // Lấy tất cả đơn KH cùng hồ sơ (dựa trên maHoSo của KH)
             const dsDonCungHoSo_KH = await DonDangKyNhanHieu_KH.findAll({
                 where: { maHoSo: plainDon.maHoSo },
                 attributes: ["maDonDangKy"],
+                raw: true,
             });
-
-            const maDonList = dsDonCungHoSo_KH.map(d => d.maDonDangKy);
-
-            if (maDonList.length > 0) {
-                const dsDonSuaDoi = await DonSuaDoi_NH_KH.findAll({
+            maDonListForScope = [...new Set([...maDonListForScope, ...dsDonCungHoSo_KH.map((d) => d.maDonDangKy)])];
+        }
+        if (maDonListForScope.length > 0) {
+            const [dsDonSuaDoi, dsDonChuyenQuyen] = await Promise.all([
+                DonSuaDoi_NH_KH.findAll({
                     where: {
-                        maDonDangKy: maDonList,
+                        [Op.or]: [
+                            { maDonDangKy: { [Op.in]: maDonListForScope } },
+                            { maDonDangKyGoc: { [Op.in]: maDonListForScope } },
+                        ],
                     },
-                });
+                    order: [["id", "DESC"]],
+                }),
+                DonCQSH_KH.findAll({
+                    where: {
+                        [Op.or]: [
+                            { maDonDangKy: { [Op.in]: maDonListForScope } },
+                            { maDonDangKyGoc: { [Op.in]: maDonListForScope } },
+                        ],
+                    },
+                    include: [
+                        {
+                            model: KhachHangCuoi,
+                            as: "khachHangMoi",
+                            required: false,
+                            attributes: ["id", "tenKhachHang", "maKhachHang"],
+                        },
+                    ],
+                    order: [["id", "DESC"]],
+                }),
+            ]);
 
-                // Map ra chỉ những field frontend cần
-                plainDon.danhSachDonSuaDoi = dsDonSuaDoi.map(d => {
-                    const {
-                        soDon,
-                        maDonDangKyGoc,
-                        ngayYeuCau,
-                        ngayGhiNhanSuaDoi,
-                        lanSuaDoi,
-                    } = d;
-                    return {
-                        soDon,
-                        maDonDangKyGoc,
-                        ngayYeuCau,
-                        ngayGhiNhanSuaDoi,
-                        lanSuaDoi,
-                    };
-                });
-            }
+            plainDon.danhSachDonSuaDoi = dsDonSuaDoi
+                .filter((d) => Number(d.trangThaiDuyet) === 1 || Boolean(d.ngayYeuCau))
+                .map((d) => ({
+                    id: d.id,
+                    soDon: d.soDon,
+                    maDonDangKy: d.maDonDangKy,
+                    maDonDangKyGoc: d.maDonDangKyGoc,
+                    ngayYeuCau: d.ngayYeuCau,
+                    ngayGhiNhanSuaDoi: Number(d.trangThaiDuyet) === 1 ? d.ngayGhiNhanSuaDoi : null,
+                    lanSuaDoi: d.lanSuaDoi,
+                    trangThaiDuyet: d.trangThaiDuyet,
+                    ngayChapThuan: Number(d.trangThaiDuyet) === 1 ? d.ngayChapThuan : null,
+                    ngayTuChoi: d.ngayTuChoi,
+                    lyDoTuChoi: d.lyDoTuChoi,
+                }));
+
+            plainDon.danhSachDonChuyenQuyen = dsDonChuyenQuyen
+                .filter((d) => Number(d.trangThaiDuyet) === 1 || Boolean(d.ngayYeuCau))
+                .map((d) => ({
+                    id: d.id,
+                    soDon: d.soDon,
+                    loaiThayDoi: d.loaiThayDoi || "CHUYEN_NHUONG",
+                    maDonDangKy: d.maDonDangKy,
+                    maDonDangKyGoc: d.maDonDangKyGoc,
+                    ngayYeuCau: d.ngayYeuCau,
+                    ngayGhiNhanCQ: Number(d.trangThaiDuyet) === 1 ? d.ngayGhiNhanCQ : null,
+                    lanChuyenQuyen: d.lanChuyenQuyen,
+                    trangThaiDuyet: d.trangThaiDuyet,
+                    ngayChapThuan: Number(d.trangThaiDuyet) === 1 ? d.ngayChapThuan : null,
+                    ngayTuChoi: d.ngayTuChoi,
+                    lyDoTuChoi: d.lyDoTuChoi,
+                    hanTraLoi: d.hanTraLoi || null,
+                    tuDongTuChoi: Boolean(d.tuDongTuChoi),
+                    tenKhachHangMoi: d.khachHangMoi?.tenKhachHang || null,
+                }));
         }
 
         // Gắn thông tin khách hàng phẳng
